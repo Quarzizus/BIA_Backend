@@ -27,6 +27,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .cache
 *.tsbuildinfo
 
+# prisma generated client
+src/generated
+
 # IntelliJ based IDEs
 .idea
 

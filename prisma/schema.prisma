@@ -1,0 +1,132 @@
+// Prisma 7 schema — AI Energy Platform.
+// The database URL lives in prisma.config.ts (moved out of the datasource block in v7).
+
+generator client {
+  provider   = "prisma-client"
+  output     = "../src/generated/prisma"
+  engineType = "client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum MeterStatus {
+  NORMAL
+  ALERT
+  CRITICAL
+}
+
+enum EventType {
+  OPERATIONAL_CHANGE
+  SCHEDULED_OUTAGE
+  DATA_QUALITY
+  UNKNOWN
+}
+
+enum AnomalyType {
+  REAL_ANOMALY
+  EXPLAINABLE_ANOMALY
+  FALSE_POSITIVE
+  DATA_QUALITY
+}
+
+enum Severity {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum AnomalyStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+}
+
+enum AnalysisStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+model Meter {
+  id        String      @id @default(cuid())
+  meterId   String      @unique
+  name      String
+  location  String
+  status    MeterStatus @default(NORMAL)
+  createdAt DateTime    @default(now())
+  readings  Reading[]
+  events    Event[]
+  anomalies Anomaly[]
+
+  @@map("meters")
+}
+
+model Reading {
+  id             String   @id @default(cuid())
+  meterId        String
+  meter          Meter    @relation(fields: [meterId], references: [id], onDelete: Cascade)
+  timestamp      DateTime
+  consumptionKwh Float
+  voltageV       Float
+  currentA       Float
+  powerFactor    Float
+  status         String
+
+  // Composite index serves range queries + dedup (design D2).
+  @@unique([meterId, timestamp])
+  @@map("readings")
+}
+
+model Event {
+  id             String    @id @default(cuid())
+  meterId        String
+  meter          Meter     @relation(fields: [meterId], references: [id], onDelete: Cascade)
+  eventTimestamp DateTime
+  eventType      EventType
+  description    String
+  anomalies      Anomaly[]
+
+  @@index([meterId, eventTimestamp])
+  @@map("events")
+}
+
+model Anomaly {
+  id                String         @id @default(cuid())
+  meterId           String
+  meter             Meter          @relation(fields: [meterId], references: [id], onDelete: Cascade)
+  analysisRunId     String
+  analysisRun       AnalysisRun    @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
+  relatedEventId    String?
+  relatedEvent      Event?         @relation(fields: [relatedEventId], references: [id], onDelete: SetNull)
+  detectedAt        DateTime       @default(now())
+  type              AnomalyType
+  severity          Severity
+  confidence        Float
+  reason            String?
+  recommendedAction String?
+  status            AnomalyStatus  @default(OPEN)
+  rangeStart        DateTime
+  rangeEnd          DateTime
+  detectionType     String
+  signals           Json
+
+  @@index([meterId, status])
+  @@index([analysisRunId])
+  @@map("anomalies")
+}
+
+model AnalysisRun {
+  id          String         @id @default(cuid())
+  status      AnalysisStatus
+  // Single-running guarantee (design D2): RUNNING rows set lockToken='single'.
+  lockToken   String?        @unique
+  summary     String?
+  llmUsed     Boolean        @default(false)
+  startedAt   DateTime       @default(now())
+  completedAt DateTime?
+  anomalies   Anomaly[]
+
+  @@map("analysis_runs")
+}
