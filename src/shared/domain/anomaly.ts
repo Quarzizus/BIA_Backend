@@ -1,11 +1,11 @@
 /**
- * Anomaly domain helpers shared across modules.
+ * Helpers de dominio de anomalías compartidos entre módulos.
  *
- * The anomaly row carries both the internal FK (`meterId` -> Meter.id) and the
- * joined meter code (`meter.meterId`). Consumers of the API DTOs (anomalies
- * list/detail, dashboard recent anomalies) need the human-readable code, with
- * the join preferred and the FK as fallback. Single source of truth for that
- * mapping — pure, no zod, no Prisma client.
+ * La fila de anomalía lleva tanto el FK interno (`meterId` -> Meter.id) como el
+ * código de medidor unido (`meter.meterId`). Los consumidores de los DTO de API
+ * (lista/detalle de anomalías, anomalías recientes del dashboard) necesitan el
+ * código legible, con preferencia por el join y el FK como fallback. Fuente
+ * única de verdad para ese mapeo — puro, sin zod, sin Prisma client.
  */
 
 export interface AnomalyMeterCodeSource {
@@ -13,7 +13,6 @@ export interface AnomalyMeterCodeSource {
   meter?: { meterId: string } | null;
 }
 
-/** Meter code for an anomaly row: prefer the joined meter, fall back to the FK. */
 export function anomalyMeterCode(anomaly: AnomalyMeterCodeSource): string {
   return anomaly.meter?.meterId ?? anomaly.meterId;
 }

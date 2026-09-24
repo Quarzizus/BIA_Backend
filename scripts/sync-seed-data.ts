@@ -2,15 +2,16 @@ import { basename, dirname, join } from "node:path";
 import { copyFileSync, existsSync, mkdirSync, statSync } from "node:fs";
 
 /**
- * Copies the canonical dataset CSVs from docs/ into prisma/seed-data/ so the
- * seed is independent of the working directory (design decision D1).
+ * Copia los CSVs canónicos del dataset desde docs/ a prisma/seed-data/ para que
+ * el seed sea independiente del directorio de trabajo (decisión de diseño D1).
  *
- * Source files are resolved relative to this script's location, NOT the cwd,
- * so `bun scripts/sync-seed-data.ts` works from any directory (docker compose
- * included). Fails loudly when a source is missing or empty.
+ * Los archivos fuente se resuelven relativos a la ubicación de este script, NO
+ * al cwd, de modo que `bun scripts/sync-seed-data.ts` funcione desde cualquier
+ * directorio (docker compose incluido). Falla con ruido cuando un fuente falta
+ * o está vacío.
  */
 
-const REPO_ROOT = dirname(import.meta.dir); // scripts/ -> repo root
+const REPO_ROOT = dirname(import.meta.dir);
 const SEED_DATA_DIR = join(REPO_ROOT, "prisma", "seed-data");
 
 const SOURCES = ["docs/readings.csv", "docs/events.csv"] as const;

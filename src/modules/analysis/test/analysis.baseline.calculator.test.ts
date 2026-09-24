@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { computeBaseline, type BaselineSignal } from "../stages/analysis.baseline.calculator";
 
-/** Builds hourly readings for a synthetic meter over `days` starting 2026-09-01. */
 function makeReadings(
   days: number,
   signals: (index: number) => { c: number; v: number; a: number; pf: number },
@@ -25,8 +24,8 @@ function makeReadings(
 
 describe("computeBaseline (first 7 days)", () => {
   test("computes population mean/std for all 4 signals over the first-7d window (D9)", () => {
-    // 14 days of data: days 0-6 baseline ~50±1, days 7-13 shifted to ~75.
-    // noise alternates ±1 → population std exactly 1.
+    // 14 días de datos: días 0-6 baseline ~50±1, días 7-13 desplazados a ~75.
+    // el ruido alterna ±1 → std poblacional exactamente 1.
     const readings = makeReadings(14, (i) => {
       const day = Math.floor(i / 24);
       const base = day < 7 ? 50 : 75;
@@ -40,7 +39,7 @@ describe("computeBaseline (first 7 days)", () => {
       expect(baseline[signal].std).toBeCloseTo(std, 1);
     };
 
-    // First 7 days only (168 readings) → mean 50, population std 1.
+    // Solo los primeros 7 días (168 lecturas) → media 50, std poblacional 1.
     expectSignal("consumption_kwh", 50, 1);
     expectSignal("voltage_v", 220, 0);
     expectSignal("current_a", 25, 0.5);

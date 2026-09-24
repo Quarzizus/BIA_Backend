@@ -22,7 +22,6 @@ function write(level: LogLevel, message: string, fields?: Record<string, unknown
   }
 }
 
-/** Structured JSON logger — one JSON object per line. */
 export const logger: Logger = {
   info: (message, fields) => write("info", message, fields),
   warn: (message, fields) => write("warn", message, fields),

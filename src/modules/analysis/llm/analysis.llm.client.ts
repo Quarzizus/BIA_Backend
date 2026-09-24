@@ -10,13 +10,15 @@ import type {
 import { buildExplainPrompt, parseExplanation } from "./analysis.llm.explainer";
 
 /**
- * OpenAI-compatible LLM client (design D7/D8).
+ * Cliente LLM compatible OpenAI (diseño D7/D8).
  *
- * Fail-fast by contract: the client only constructs a request and throws on any
- * provider error (timeout, HTTP error, malformed JSON, schema mismatch). There
- * is NO silent rule-based fallback — the caller fails the analysis run.
+ * Fail-fast por contrato: el cliente solo construye la request y lanza ante
+ * cualquier error del proveedor (timeout, error HTTP, JSON malformado,
+ * mismatch de schema). NO hay fallback silencioso basado en reglas — el caller
+ * falla el run de análisis.
  *
- * The env shape, I/O contracts and SYSTEM_PROMPT are shared via shared/domain/llm.
+ * La forma del env, los contratos I/O y el SYSTEM_PROMPT se comparten vía
+ * shared/domain/llm.
  */
 
 export type { ClassifyInput, ClassifyOutput, ExplainInput, ExplainOutput, LlmEnv } from "../../../shared/domain/llm";
@@ -30,7 +32,6 @@ const classifySchema = z.object({
 
 type JsonInput = Record<string, unknown>;
 
-/** Builds chat messages for a task + JSON payload (stringified into content). */
 function buildMessages(
   task: string,
   payload: JsonInput,
@@ -75,7 +76,6 @@ async function completeJson(
   return result.data;
 }
 
-/** Performs the chat completion and returns the raw message content string. */
 async function completeJsonRaw(
   env: LlmEnv,
   messages: { role: string; content: string }[],
@@ -124,7 +124,6 @@ async function completeJsonRaw(
   return content;
 }
 
-/** Classifies an ambiguous/borderline anomaly via the LLM. */
 export async function classifyWithLlm(
   env: LlmEnv,
   input: ClassifyInput,
@@ -138,7 +137,6 @@ export async function classifyWithLlm(
   return data as unknown as ClassifyOutput;
 }
 
-/** Generates a Spanish reason + recommended_action for a confirmed anomaly. */
 export async function explainWithLlm(
   env: LlmEnv,
   input: ExplainInput,
@@ -148,7 +146,7 @@ export async function explainWithLlm(
   return parseExplanation(content);
 }
 
-/** Builds an injected LlmClient from environment configuration (design D8). */
+/** Construye un LlmClient inyectado a partir de la configuración del entorno (diseño D8). */
 export function createLlmClient(env: LlmEnv): LlmClient {
   return {
     classify: (input: ClassifyInput) => classifyWithLlm(env, input),

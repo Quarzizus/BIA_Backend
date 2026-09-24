@@ -1,5 +1,5 @@
-// Public surface of the analysis module.
-// External consumers import from here — never from internal stages/ or llm/ paths.
+// Superficie pública del módulo analysis.
+// Los consumidores externos importan desde aquí — nunca desde rutas internas stages/ o llm/.
 
 export { createAnalysisRouter } from "./analysis.routes";
 export type { AnalysisRouterDeps } from "./analysis.routes";

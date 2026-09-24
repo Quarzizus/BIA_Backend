@@ -1,6 +1,7 @@
 /**
- * Shared time constants (ms) used across modules. Single source of truth —
- * previously re-declared in detector, meter.repository and inline baselines.
+ * Constantes de tiempo compartidas (ms) usadas por varios módulos. Fuente única
+ * de verdad — antes se redeclaraban en detector, meter.repository y baselines
+ * inline.
  */
 
 export const HOUR_MS = 60 * 60 * 1000;

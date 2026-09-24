@@ -3,7 +3,6 @@ import { PrismaPg } from "@prisma/adapter-pg";
 
 let prisma: PrismaClient | null = null;
 
-/** Returns the process-wide PrismaClient singleton (Prisma 7 driver adapter). */
 export function getPrisma(): PrismaClient {
   if (!prisma) {
     const DATABASE_URL = process.env.DATABASE_URL;
@@ -16,7 +15,6 @@ export function getPrisma(): PrismaClient {
   return prisma;
 }
 
-/** Verifies database connectivity with a trivial query. */
 export async function pingDatabase(client: PrismaClient = getPrisma()): Promise<void> {
   await client.$queryRaw`SELECT 1`;
 }

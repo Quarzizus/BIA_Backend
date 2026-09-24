@@ -1,6 +1,6 @@
 import type { AnomalyStatus } from "../../generated/prisma/enums";
 
-/** Allowed forward-only transitions: OPEN -> INVESTIGATING -> RESOLVED. */
+/** Transiciones permitidas solo hacia adelante: OPEN -> INVESTIGATING -> RESOLVED. */
 const TRANSITIONS: Record<AnomalyStatus, readonly AnomalyStatus[]> = {
   OPEN: ["INVESTIGATING"],
   INVESTIGATING: ["RESOLVED"],

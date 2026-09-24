@@ -135,7 +135,7 @@ describe("classifyAnomaly — LLM borderline routing", () => {
         rangeEnd: new Date("2026-09-14T23:00:00.000Z"),
         events: [
           {
-            eventTimestamp: new Date("2026-09-12T08:00:00.000Z"), // 6h before range start
+            eventTimestamp: new Date("2026-09-12T08:00:00.000Z"),
             eventType: "OPERATIONAL_CHANGE",
           },
         ],

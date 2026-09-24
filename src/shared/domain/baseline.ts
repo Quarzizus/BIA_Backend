@@ -1,11 +1,11 @@
 /**
- * Baseline statistics — shared domain (PR2/PR3).
+ * Estadísticas de baseline — dominio compartido (PR2/PR3).
  *
- * Canonical pure implementation of the first-7-days baseline rule (design D9:
- * population standard deviation). Consumed by the meters read APIs, the
- * analysis pipeline (baseline.calculator) and the detector.
+ * Implementación pura canónica de la regla de los primeros 7 días (diseño D9:
+ * desviación estándar poblacional). La consumen las APIs de lectura de meters,
+ * el pipeline de análisis (baseline.calculator) y el detector.
  *
- * This module is pure: no zod, no Prisma client.
+ * Este módulo es puro: sin zod, sin Prisma client.
  */
 
 import { DAY_MS } from "./time";
@@ -32,13 +32,12 @@ export interface BaselineStats {
   power_factor: SignalStats;
 }
 
-/** Arithmetic mean; null for an empty list. */
 export function mean(values: number[]): number | null {
   if (values.length === 0) return null;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
-/** Population standard deviation (design D9); 0 for a single value, null for empty. */
+/** Desviación estándar poblacional (diseño D9); 0 para un único valor, null si está vacío. */
 export function populationStd(values: number[], knownMean?: number | null): number | null {
   if (values.length === 0) return null;
   const m = knownMean ?? mean(values);
@@ -48,8 +47,8 @@ export function populationStd(values: number[], knownMean?: number | null): numb
 }
 
 /**
- * First-7-days window of a meter's readings: everything strictly before
- * (first timestamp + 7 days). Expects readings sorted ascending.
+ * Ventana de primeros 7 días de un medidor: todo lo estrictamente anterior a
+ * (primer timestamp + 7 días). Espera lecturas ordenadas ascendentemente.
  */
 export function baselineWindow(
   readings: BaselineReading[],
@@ -60,7 +59,6 @@ export function baselineWindow(
   return readings.filter((reading) => reading.timestamp.getTime() < cutoff);
 }
 
-/** Mean and population std for each of the four signals over the given readings. */
 export function computeBaselineStats(readings: BaselineReading[]): BaselineStats {
   const signal = (pick: (reading: BaselineReading) => number): SignalStats => {
     const values = readings.map(pick);
@@ -76,8 +74,9 @@ export function computeBaselineStats(readings: BaselineReading[]): BaselineStats
 }
 
 /**
- * Percentage variation of the current reading vs the baseline mean, rounded to
- * one decimal. Null when either side is unavailable or the baseline mean is 0.
+ * Variación porcentual de la lectura actual vs la media del baseline, redondeada
+ * a un decimal. Null cuando alguno de los lados no está disponible o la media
+ * del baseline es 0.
  */
 export function variationPct(
   current: number | null,

@@ -6,8 +6,9 @@ import { createApp } from "./app";
 import { createLlmClient } from "./modules/analysis";
 
 /**
- * Boot sweep (design D3): orphaned RUNNING analysis runs (e.g. after a crash)
- * are marked FAILED and their lock token released so a new run can start.
+ * Barrido de arranque (diseño D3): los análisis RUNNING huérfanos (p. ej. tras
+ * un crash) se marcan como FAILED y se libera su lock para que un nuevo run
+ * pueda empezar.
  */
 export async function recoverOrphanedRuns(prisma: PrismaClient): Promise<number> {
   const result = await prisma.analysisRun.updateMany({

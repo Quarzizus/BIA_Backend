@@ -1,11 +1,11 @@
 /**
- * LLM integration — shared domain types and the single system prompt.
+ * Integración LLM — tipos de dominio compartidos y el único system prompt.
  *
- * The AI environment shape (`LlmEnv`), the classify/explain I/O contracts and
- * the Spanish SYSTEM_PROMPT are shared between the LLM client
- * (analysis.llm.client) and the explanation builder (analysis.llm.explainer).
- * Pure types + one constant: no zod schemas here (they live with the
- * validators that use them).
+ * La forma del entorno de IA (`LlmEnv`), los contratos I/O de classify/explain y
+ * el SYSTEM_PROMPT en español se comparten entre el cliente LLM
+ * (analysis.llm.client) y el builder de explicaciones (analysis.llm.explainer).
+ * Tipos puros + una constante: sin schemas zod aquí (viven con los validadores
+ * que los usan).
  */
 
 export interface LlmEnv {
@@ -44,7 +44,6 @@ export interface ExplainOutput {
   recommended_action: string;
 }
 
-/** Single system prompt for every LLM call (classify + explain). */
 export const SYSTEM_PROMPT = [
   "Eres un analista experto en calidad de energía eléctrica industrial.",
   "Responde ÚNICAMENTE con JSON válido, sin texto adicional.",

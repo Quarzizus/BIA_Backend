@@ -10,15 +10,15 @@ import {
 import type { MeterBaseline } from "../analysis.domain";
 
 /**
- * Pipeline-facing baseline calculator (Stage 1). Reuses the pure statistical
- * helpers from shared/domain (first-7-days window, population std D9) and
- * exposes the per-signal stats the detector consumes.
+ * Calculador de baseline para el pipeline (Etapa 1). Reutiliza los helpers
+ * estadísticos puros de shared/domain (ventana de primeros 7 días, std
+ * poblacional D9) y expone las estadísticas por señal que consume el detector.
  */
 
 export type { BaselineStats };
 export type { BaselineSignal, MeterBaseline, SignalStats } from "../analysis.domain";
 
-/** First-7-days readings for a meter (shared rule with the meters read APIs). */
+/** Lecturas de los primeros 7 días de un medidor (regla compartida con las APIs de lectura de meters). */
 export function baselineReadingsWindow<T extends { timestamp: Date }>(
   readings: T[],
 ): T[] {
@@ -29,7 +29,6 @@ export function baselineReadingsWindow<T extends { timestamp: Date }>(
   return window as unknown as T[];
 }
 
-/** Mean and population std for each of the four signals over the first 7 days. */
 export function computeBaseline(readings: {
   timestamp: Date;
   consumptionKwh: number;

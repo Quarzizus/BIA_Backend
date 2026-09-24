@@ -35,9 +35,9 @@ export function createMeterService(prisma: PrismaClient): MeterService {
       }
 
       return meters.map((meter) => {
-        // Reading.meterId is the FK to the internal Meter.id (NOT the meter
-        // code); the repository methods take codes and translate via the
-        // relation. Key the maps by meter.id — the FK the readings carry.
+        // Reading.meterId es el FK al Meter.id interno (NO el código de
+        // medidor); los métodos del repositorio reciben códigos y traducen vía
+        // la relación. Keyed por meter.id — el FK que llevan las readings.
         const current = latestByCode.get(meter.id);
         const baselineMean = baselineMeanByCode.get(meter.id) ?? null;
         return {

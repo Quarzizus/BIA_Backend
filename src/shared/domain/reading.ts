@@ -1,9 +1,9 @@
 /**
- * Reading API DTO + mapper — shared by the meters and readings modules
- * (previously duplicated in meter.service and reading.service).
+ * DTO de lectura + mapper — compartido por los módulos meters y readings
+ * (antes duplicado en meter.service y reading.service).
  *
- * The mapper accepts any row structurally shaped like a Prisma Reading; it
- * intentionally does not import the Prisma client.
+ * El mapper acepta cualquier fila con la forma estructural de una Reading de
+ * Prisma; a propósito no importa el cliente de Prisma.
  */
 
 export interface ReadingRow {

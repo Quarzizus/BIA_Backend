@@ -1,8 +1,8 @@
 import "dotenv/config";
 import { defineConfig, env } from "prisma/config";
 
-// dotenv ensures DATABASE_URL resolves even when the CLI process does not
-// inherit Bun's auto-loaded .env (e.g. `bunx prisma`).
+// dotenv garantiza que DATABASE_URL se resuelva incluso cuando el proceso CLI no
+// hereda el .env auto-cargado por Bun (p. ej. `bunx prisma`).
 export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {

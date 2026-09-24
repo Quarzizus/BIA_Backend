@@ -1,12 +1,12 @@
 import type { MeterStatus } from "../../generated/prisma/enums";
 
 /**
- * Design D4: a meter's status reflects the most severe ACTIVE (not RESOLVED)
- * anomaly: HIGH -> CRITICAL, MEDIUM -> ALERT, otherwise NORMAL.
+ * Diseño D4: el status de un medidor refleja la anomalía ACTIVE (no RESOLVED)
+ * más severa: HIGH -> CRITICAL, MEDIUM -> ALERT, si no NORMAL.
  *
- * Single source of truth for the derivation. Reused by analysis run
- * completion (analysis.repository) and anomaly PATCH transitions
- * (anomalies/service) so the rule lives in exactly one place.
+ * Fuente única de verdad para la derivación. La reutilizan la finalización de
+ * runs de análisis (analysis.repository) y las transiciones PATCH de anomalías
+ * (anomalies/service) para que la regla viva en un solo lugar.
  */
 export function deriveMeterStatus(activeSeverities: readonly string[]): MeterStatus {
   if (activeSeverities.includes("HIGH")) return "CRITICAL";

@@ -9,20 +9,21 @@ import {
 } from "../analysis.domain";
 
 /**
- * Stage 3 — Classifier.
+ * Etapa 3 — Clasificador.
  *
- * Maps a consolidated detection (one per meter per run) to an anomaly type and
- * severity using event coverage: `event_timestamp ∈ [rangeStart, rangeEnd]`.
- * DATA_QUALITY signal has priority. Borderline cases (2.5 <= maxZ < 3 or a
- * near-miss event within ±6h of the range) are routed to the LLM.
+ * Mapea una detección consolidada (una por medidor por run) a un tipo y
+ * severidad de anomalía usando cobertura de eventos: `event_timestamp ∈
+ * [rangeStart, rangeEnd]`. La señal DATA_QUALITY tiene prioridad. Los casos
+ * límite (2.5 <= maxZ < 3 o un evento near-miss a ±6h del rango) se enrutan al
+ * LLM.
  *
- * Types and constants live in analysis.domain; this file keeps the rules.
+ * Los tipos y constantes viven en analysis.domain; este archivo mantiene las
+ * reglas.
  */
 
 export type { ClassifyInput, Classification, MeterEvent } from "../analysis.domain";
 export { LLM_Z_MIN, LLM_Z_MAX, nearMissWindowMs } from "../analysis.domain";
 
-/** Finds the event whose timestamp lies inside the affected range (inclusive). */
 export function coveringEvent(input: ClassifyInput): MeterEvent | null {
   const start = input.rangeStart.getTime();
   const end = input.rangeEnd.getTime();
@@ -34,7 +35,7 @@ export function coveringEvent(input: ClassifyInput): MeterEvent | null {
   );
 }
 
-/** Event within ±6h of the range but outside it → LLM borderline. */
+/** Evento a ±6h del rango pero fuera de él → candidato a LLM (borderline). */
 export function nearMissEvent(input: ClassifyInput): MeterEvent | null {
   const start = input.rangeStart.getTime();
   const end = input.rangeEnd.getTime();
@@ -48,14 +49,14 @@ export function nearMissEvent(input: ClassifyInput): MeterEvent | null {
 }
 
 /**
- * Rule-based classification with LLM routing. Priority:
- * DATA_QUALITY detection > covering event mapping > REAL_ANOMALY/HIGH.
- * Borderline (|z| in [2.5, 3) or near-miss event) → needsLlm true.
+ * Clasificación basada en reglas con enrutamiento al LLM. Prioridad:
+ * detección DATA_QUALITY > mapeo del evento de cobertura > REAL_ANOMALY/HIGH.
+ * Borde (|z| en [2.5, 3) o evento near-miss) → needsLlm true.
  */
 export function classifyAnomaly(input: ClassifyInput): Classification {
   const event = coveringEvent(input);
 
-  // DATA_QUALITY signal has classification priority (spec 3-stage pipeline rules).
+  // La señal DATA_QUALITY tiene prioridad de clasificación (reglas del pipeline de 3 etapas de la spec).
   if (input.detectionType.includes("DATA_QUALITY")) {
     return { type: "DATA_QUALITY", severity: "HIGH", needsLlm: false, coveringEvent: event?.eventType ?? null };
   }

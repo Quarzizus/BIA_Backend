@@ -4,14 +4,14 @@ import { deriveMeterStatus } from "../../shared/domain/meter-status";
 import type { MeterEvent } from "./analysis.domain";
 
 /**
- * Analysis persistence layer — ALL Prisma access for the analysis module.
+ * Capa de persistencia del análisis — TODO el acceso a Prisma del módulo.
  *
- * Owns AnalysisRun CRUD, pipeline data loading, the event lookup and the
- * atomic anomaly + meter-status write that completes a run. Pure persistence:
- * business derivation (e.g. meter status) comes from shared/domain.
+ * Tiene el CRUD de AnalysisRun, la carga de datos del pipeline, la búsqueda de
+ * eventos y la escritura atómica de anomalías + status de medidor que completa
+ * un run. Persistencia pura: la derivación de negocio (p. ej. status de
+ * medidor) viene de shared/domain.
  */
 
-/** One consolidated anomaly to persist for a meter (payload for Prisma). */
 export interface AnalysisFinding {
   meterId: string;
   detectionType: string;
@@ -41,7 +41,7 @@ export interface AnalysisRepository {
     eventTimestamp: Date,
     eventType: MeterEvent["eventType"],
   ): Promise<{ id: string } | null>;
-  /** Persists findings + recomputed meter status + run completion atomically. */
+  /** Persiste hallazgos + status de medidor recalculado + finalización del run, atómicamente. */
   persistFindings(runId: string, findings: AnalysisFinding[], summary: string): Promise<void>;
   failRun(runId: string, message: string): Promise<void>;
   countAnomalies(runId: string): Promise<number>;
@@ -108,7 +108,7 @@ export function createAnalysisRepository(prisma: PrismaClient): AnalysisReposito
               signals: finding.signals,
             },
           });
-          // D4: meter status reflects the most severe OPEN anomaly of this run.
+          // D4: el status del medidor refleja la anomalía OPEN más severa de este run.
           const meterStatus = deriveMeterStatus([finding.severity]);
           await tx.meter.update({
             where: { id: finding.meterId },

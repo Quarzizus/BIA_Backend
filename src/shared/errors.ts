@@ -2,7 +2,6 @@ import { ZodError } from "zod";
 import type { NextFunction, Request, Response } from "express";
 import { logger } from "./logger";
 
-/** Application error carrying an HTTP status and a stable machine-readable code. */
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -23,7 +22,6 @@ export interface ErrorMapping {
   body: ErrorResponseBody;
 }
 
-/** Minimal structural shape of a Prisma known request error (code P####). */
 interface PrismaErrorLike {
   code?: unknown;
   meta?: Record<string, unknown> | null;
@@ -40,10 +38,11 @@ function isPrismaErrorLike(err: unknown): err is PrismaErrorLike {
 }
 
 /**
- * Collects the constraint identifiers involved in a unique-constraint violation.
- * Prisma 6 exposes `meta.target` (column names); Prisma 7 with the driver
- * adapter nests them under `meta.driverAdapterError.cause.constraint.index`
- * (constraint name). Both shapes are handled so the lockToken check is robust.
+ * Recoge los identificadores de constraint implicados en una violación de
+ * unique. Prisma 6 expone `meta.target` (nombres de columna); Prisma 7 con el
+ * adapter de driver los anida en `meta.driverAdapterError.cause.constraint.index`
+ * (nombre del constraint). Se manejan ambas formas para que el chequeo del
+ * lockToken sea robusto.
  */
 function uniqueTargets(meta: Record<string, unknown> | null | undefined): string[] {
   if (!meta) return [];
@@ -62,7 +61,6 @@ function uniqueTargets(meta: Record<string, unknown> | null | undefined): string
   return targets;
 }
 
-/** Human-readable rendering of zod issues ("field: message; ..."). */
 export function formatZodIssues(error: ZodError): string {
   return error.issues
     .map((issue) => {
@@ -73,9 +71,9 @@ export function formatZodIssues(error: ZodError): string {
 }
 
 /**
- * Maps any thrown value to an HTTP response. Order matters: ApiError (app-level),
- * ZodError (validation → 400), Prisma known errors (P2025 → 404, P2002 → 409),
- * anything else → 500 INTERNAL_ERROR.
+ * Mapea cualquier valor lanzado a una respuesta HTTP. El orden importa:
+ * ApiError (nivel app), ZodError (validación → 400), errores conocidos de
+ * Prisma (P2025 → 404, P2002 → 409), cualquier otra cosa → 500 INTERNAL_ERROR.
  */
 export function mapErrorToResponse(err: unknown): ErrorMapping {
   if (err instanceof ApiError) {
@@ -117,7 +115,6 @@ export function mapErrorToResponse(err: unknown): ErrorMapping {
   };
 }
 
-/** Express error middleware: maps any thrown error to a JSON error response. */
 export function errorMiddleware(
   err: unknown,
   req: Request,
@@ -143,7 +140,6 @@ export function errorMiddleware(
   res.status(mapped.status).json(mapped.body);
 }
 
-/** Catch-all 404 for unmatched routes. */
 export function notFoundHandler(req: Request, res: Response): void {
   res.status(404).json({
     error: { code: "NOT_FOUND", message: `Route ${req.method} ${req.path} not found` },

@@ -13,9 +13,9 @@ export interface TestServer {
 }
 
 /**
- * Boots an express app on an ephemeral port with the given router mounts,
- * wired with JSON parsing, the catch-all 404 and the error middleware —
- * the same wiring the production app uses.
+ * Levanta una app express en un puerto efímero con los routers indicados,
+ * cableada con parseo JSON, el 404 catch-all y el middleware de errores — el
+ * mismo cableado que usa la app de producción.
  */
 export async function startTestServer(mounts: RouterMount[]): Promise<TestServer> {
   const app = express();

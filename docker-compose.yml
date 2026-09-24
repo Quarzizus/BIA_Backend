@@ -21,7 +21,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      # Inside the compose network the database host is `postgres`.
+      # Dentro de la red de compose el host de la base de datos es `postgres`.
       DATABASE_URL: postgresql://bia:bia@postgres:5432/bia_dev
       AI_API_KEY: ${AI_API_KEY:-}
       AI_BASE_URL: ${AI_BASE_URL:-}
@@ -29,7 +29,7 @@ services:
       PORT: 3000
     ports:
       - "3000:3000"
-    # Seed-on-start contract: apply migrations, seed idempotently, then boot.
+    # Contrato seed-on-start: aplicar migraciones, sembrar idempotentemente, luego arrancar.
     command: sh -c "bunx prisma migrate deploy && bun prisma/seed.ts && bun src/server.ts"
 
 volumes:

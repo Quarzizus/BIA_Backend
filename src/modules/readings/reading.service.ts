@@ -12,7 +12,7 @@ export function createReadingsService(prisma: PrismaClient): ReadingsService {
       const from = range.from ? new Date(range.from) : undefined;
       const to = range.to ? new Date(range.to) : undefined;
 
-      // `from <= to` is enforced by the readingsQuery zod refine (reading.model.ts).
+      // `from <= to` lo garantiza el refine de zod de readingsQuery (reading.model.ts).
       if (!(await repository.meterExists(meterId))) {
         throw new ApiError(404, "NOT_FOUND", `Meter ${meterId} not found`);
       }

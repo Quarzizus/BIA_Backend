@@ -12,8 +12,8 @@ if (!DATABASE_URL) {
 const adapter = new PrismaPg({ connectionString: DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
-// Resolved relative to this file, never the cwd (design decision D1) — docker
-// compose up must work from any directory.
+// Resuelto relativo a este archivo, nunca al cwd (decisión de diseño D1) —
+// docker compose up debe funcionar desde cualquier directorio.
 const SEED_DATA_DIR = join(import.meta.dir, "seed-data");
 
 interface ReadingCsvRow {
@@ -41,9 +41,9 @@ const EVENT_TYPES: readonly string[] = [
 ];
 
 /**
- * Normalizes a naive CSV timestamp ("2026-09-01 00:00:00" or "2026-09-11 00:00")
- * to a UTC Date by replacing the space with "T", padding seconds and appending
- * "Z". Deterministic: the same row always produces the same instant.
+ * Normaliza un timestamp CSV naive ("2026-09-01 00:00:00" o "2026-09-11 00:00")
+ * a un Date UTC reemplazando el espacio por "T", completando segundos y
+ * añadiendo "Z". Determinista: la misma fila produce siempre el mismo instante.
  */
 export function normalizeTimestampToUtc(raw: string): Date {
   const withT = raw.trim().replace(" ", "T");
@@ -52,7 +52,6 @@ export function normalizeTimestampToUtc(raw: string): Date {
   return new Date(`${normalized}Z`);
 }
 
-/** Splits one CSV line into fields, honoring double-quoted fields. */
 export function splitCsvLine(line: string): string[] {
   const values: string[] = [];
   let current = "";
@@ -71,7 +70,6 @@ export function splitCsvLine(line: string): string[] {
   return values;
 }
 
-/** Parses CSV text into records keyed by the header row. */
 export function parseCsv<T>(text: string): T[] {
   const lines = text.trim().split(/\r?\n/);
   const header = lines[0];
@@ -98,9 +96,9 @@ function readSeedCsv<T>(fileName: string): T[] {
 }
 
 /**
- * Deterministic, idempotent seed. When the counts already match the dataset
- * (12 meters / 4032 readings / 4 events) it skips; otherwise it wipes and
- * recreates the data inside a single transaction.
+ * Seed determinista e idempotente. Cuando los conteos ya coinciden con el
+ * dataset (12 meters / 4032 readings / 4 events) omite; si no, borra y recrea
+ * los datos dentro de una sola transacción.
  */
 export async function seed(): Promise<void> {
   const readings = readSeedCsv<ReadingCsvRow>("readings.csv");

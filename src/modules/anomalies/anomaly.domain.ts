@@ -1,10 +1,10 @@
 /**
- * Anomalies domain — pure types, DTOs and the service/repository contracts.
+ * Dominio de anomalías — tipos puros, DTOs y contratos service/repository.
  *
- * No zod schemas (they live in anomaly.model.ts) and no Prisma client. The
- * repository contract works against the structural `AnomalyRow` shape; the
- * concrete persistence-coupled payload (`AnomalyWithRelations`) stays in
- * anomaly.repository.ts and structurally satisfies it.
+ * Sin schemas zod (viven en anomaly.model.ts) y sin Prisma client. El contrato
+ * del repository trabaja contra la forma estructural `AnomalyRow`; el payload
+ * concreto acoplado a persistencia (`AnomalyWithRelations`) queda en
+ * anomaly.repository.ts y lo satisface estructuralmente.
  */
 
 import type {
@@ -14,18 +14,10 @@ import type {
   Severity,
 } from "../../generated/prisma/enums";
 
-/* ------------------------------------------------------------------ */
-/* List filters (typed with Prisma enums — kills the repository casts) */
-/* ------------------------------------------------------------------ */
-
 export interface AnomalyFilters {
   status?: AnomalyStatus;
   severity?: Severity;
 }
-
-/* ------------------------------------------------------------------ */
-/* API DTOs (previously in anomaly.model.ts)                           */
-/* ------------------------------------------------------------------ */
 
 export interface AnomalyListItem {
   id: string;
@@ -55,10 +47,6 @@ export interface AnomalyDetail extends AnomalyListItem {
   analysis_run_id: string;
 }
 
-/* ------------------------------------------------------------------ */
-/* Repository row shape (what the service consumes)                    */
-/* ------------------------------------------------------------------ */
-
 export interface AnomalyRow {
   id: string;
   meterId: string;
@@ -83,10 +71,6 @@ export interface AnomalyRow {
   analysisRunId: string;
 }
 
-/* ------------------------------------------------------------------ */
-/* Contracts                                                           */
-/* ------------------------------------------------------------------ */
-
 export interface AnomalyService {
   list(filters: AnomalyFilters): Promise<AnomalyListItem[]>;
   detail(id: string): Promise<AnomalyDetail>;
@@ -96,6 +80,6 @@ export interface AnomalyService {
 export interface AnomalyRepository {
   list(filters: AnomalyFilters): Promise<AnomalyRow[]>;
   findById(id: string): Promise<AnomalyRow | null>;
-  /** Persists the transition and recomputes Meter.status atomically (design D4). */
+  /** Persiste la transición y recalcula Meter.status atómicamente (diseño D4). */
   updateStatusWithMeterRecompute(id: string, status: AnomalyStatus): Promise<void>;
 }

@@ -2,9 +2,9 @@ import type { PrismaClient } from "../../generated/prisma/client";
 import type { DashboardRepository } from "./dashboard.domain";
 
 /**
- * Dashboard persistence — ALL Prisma access for the dashboard module.
- * Raw aggregations only; the summary assembly (count maps, DTO mapping)
- * lives in dashboard.service.ts.
+ * Persistencia del dashboard — TODO el acceso a Prisma del módulo dashboard.
+ * Solo agregaciones crudas; el armado del summary (mapas de conteos, mapeo a
+ * DTOs) vive en dashboard.service.ts.
  */
 export function createDashboardRepository(prisma: PrismaClient): DashboardRepository {
   return {

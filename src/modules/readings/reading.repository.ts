@@ -2,9 +2,6 @@ import type { PrismaClient } from "../../generated/prisma/client";
 import type { Reading } from "../../generated/prisma/client";
 import type { ReadingsRepository } from "./reading.domain";
 
-/**
- * Readings persistence — ALL Prisma access for the readings module.
- */
 export function createReadingsRepository(prisma: PrismaClient): ReadingsRepository {
   return {
     async meterExists(meterId: string): Promise<boolean> {

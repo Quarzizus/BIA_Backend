@@ -3,13 +3,6 @@ import type { AnomalyStatus } from "../../generated/prisma/enums";
 import { deriveMeterStatus } from "../../shared/domain/meter-status";
 import type { AnomalyFilters, AnomalyRepository, AnomalyRow } from "./anomaly.domain";
 
-/**
- * Anomalies persistence — ALL Prisma access for the anomalies module.
- *
- * `AnomalyWithRelations` is the persistence-coupled Prisma payload; the
- * repository contract (anomaly.domain.ts) works against the structural
- * `AnomalyRow` shape, which this payload satisfies.
- */
 export const anomalyInclude = {
   meter: { select: { meterId: true } },
   relatedEvent: true,
@@ -40,9 +33,9 @@ export function createAnomalyRepository(prisma: PrismaClient): AnomalyRepository
     },
 
     async updateStatusWithMeterRecompute(id: string, status: AnomalyStatus): Promise<void> {
-      // D4: persist the transition and recompute Meter.status from the most
-      // severe ACTIVE (not RESOLVED) anomaly in the SAME transaction, so the
-      // dashboard/meters KPIs never go stale.
+      // D4: persiste la transición y recalcula Meter.status desde la anomalía
+      // ACTIVE (no RESOLVED) más severa en la MISMA transacción, para que los
+      // KPIs del dashboard/meters nunca queden obsoletos.
       await prisma.$transaction(async (tx) => {
         const updated = await tx.anomaly.update({
           where: { id },

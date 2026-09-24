@@ -13,8 +13,8 @@ export interface AppOptions {
 }
 
 /**
- * Express app factory: JSON parsing, feature routers, catch-all 404 and the
- * global error middleware (P2025→404, P2002→409, zod→400).
+ * Factory de la app Express: parseo JSON, routers de features, 404 catch-all y
+ * el middleware global de errores (P2025→404, P2002→409, zod→400).
  */
 export function createApp(prisma: PrismaClient, options: AppOptions = {}): Express {
   const app = express();

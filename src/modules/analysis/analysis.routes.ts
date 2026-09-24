@@ -10,12 +10,12 @@ export interface AnalysisRouterDeps extends AnalysisDeps {
 }
 
 /**
- * Analysis lifecycle routes (tasks 3.8) — transport only:
+ * Rutas del ciclo de vida del análisis (tasks 3.8) — solo transporte:
  *  - POST /ai/analyze → 202 {analysis_id}; 503 AI_NOT_CONFIGURED; 409 ANALYSIS_IN_PROGRESS
  *  - GET  /ai/analysis/:id → status/summary/anomaly_count; 404
  *
- * The LLM-configuration check lives in the service (fail-fast before creating
- * the run); the routes only wire HTTP to the service.
+ * El chequeo de configuración del LLM vive en el service (fail-fast antes de
+ * crear el run); las rutas solo conectan HTTP con el service.
  */
 export function createAnalysisRouter(
   prisma: PrismaClient,
@@ -25,8 +25,8 @@ export function createAnalysisRouter(
   const service: AnalysisService = createAnalysisService(prisma, deps.llm, deps);
 
   router.post("/analyze", async (_req, res) => {
-    // Fail-fast on LLM misconfiguration (spec ai-integration): no silent
-    // fallback — service.start() throws 503 AI_NOT_CONFIGURED.
+    // Fail-fast ante mala configuración del LLM (spec ai-integration): sin
+    // fallback silencioso — service.start() lanza 503 AI_NOT_CONFIGURED.
     const run = await service.start();
     res.status(202).json({ analysis_id: run.id });
   });

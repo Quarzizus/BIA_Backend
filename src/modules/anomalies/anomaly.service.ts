@@ -72,8 +72,9 @@ export function createAnomalyService(prisma: PrismaClient): AnomalyService {
           `Cannot transition anomaly from ${anomaly.status} to ${status}`,
         );
       }
-      // D4: transition + Meter.status recompute happen atomically in the
-      // repository (updateStatusWithMeterRecompute) so KPIs never go stale.
+      // D4: la transición + el recálculo de Meter.status ocurren atómicamente
+      // en el repositorio (updateStatusWithMeterRecompute) para que los KPIs
+      // nunca queden obsoletos.
       await repository.updateStatusWithMeterRecompute(id, status);
       return detail(id);
     },

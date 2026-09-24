@@ -1,17 +1,6 @@
-/**
- * Meters domain — pure types, DTOs and the service/repository contracts.
- *
- * No zod schemas (they live in meter.model.ts) and no Prisma client: the
- * repository interface only imports Prisma types for its rows.
- */
-
 import type { Meter, Reading } from "../../generated/prisma/client";
 import type { BaselineStats } from "../../shared/domain/baseline";
 import type { ReadingDto } from "../../shared/domain/reading";
-
-/* ------------------------------------------------------------------ */
-/* API DTOs (previously in meter.model.ts)                             */
-/* ------------------------------------------------------------------ */
 
 export interface MeterSummary {
   id: string;
@@ -43,25 +32,17 @@ export interface MeterDetail {
   history: ReadingDto[];
 }
 
-/* ------------------------------------------------------------------ */
-/* Service contract                                                    */
-/* ------------------------------------------------------------------ */
-
 export interface MeterService {
   list(): Promise<MeterSummary[]>;
   detail(meterId: string): Promise<MeterDetail>;
 }
 
-/* ------------------------------------------------------------------ */
-/* Repository contract                                                 */
-/* ------------------------------------------------------------------ */
-
 export interface MeterRepository {
   listMeters(): Promise<Meter[]>;
   findMeterByCode(meterId: string): Promise<Meter | null>;
-  /** Latest reading per meter, keyed by meter CODE (the `meterId` column). */
+  /** Última lectura por medidor, keyed por el CÓDIGO del medidor (la columna `meterId`). */
   latestReadings(meterCodes: string[]): Promise<Reading[]>;
-  /** First-7-days baseline window per meter, keyed by meter CODE. */
+  /** Ventana de baseline de primeros 7 días por medidor, keyed por el CÓDIGO del medidor. */
   baselineReadings(meterCodes: string[]): Promise<Reading[]>;
   history(meterId: string): Promise<Reading[]>;
 }
