@@ -3,6 +3,7 @@ import { loadEnv } from "./config/env";
 import { getPrisma, pingDatabase } from "./config/database";
 import { logger } from "./shared/logger";
 import { createApp } from "./app";
+import { createLlmClient } from "./modules/analysis/llm.client";
 
 /**
  * Boot sweep (design D3): orphaned RUNNING analysis runs (e.g. after a crash)
@@ -28,7 +29,14 @@ if (import.meta.main) {
     logger.info("boot sweep recovered orphaned runs", { count: recovered });
   }
 
-  const app = createApp(prisma);
+  const app = createApp(prisma, {
+    analysis: {
+      AI_API_KEY: env.AI_API_KEY,
+      AI_BASE_URL: env.AI_BASE_URL,
+      AI_MODEL: env.AI_MODEL,
+      llm: createLlmClient(env),
+    },
+  });
   app.listen(env.PORT, () => {
     logger.info("server listening", { port: env.PORT });
   });

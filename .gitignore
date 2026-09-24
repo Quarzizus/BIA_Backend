@@ -35,3 +35,6 @@ src/generated
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# codegraph local index
+.codegraph
