@@ -1,0 +1,5 @@
+meter_id,event_timestamp,event_type,description
+M-104,2026-09-11 00:00,OPERATIONAL_CHANGE,New production line activated
+M-106,2026-09-08 00:00,SCHEDULED_OUTAGE,Scheduled maintenance outage for 12 hours
+M-109,2026-09-12 14:00,UNKNOWN,No operational event reported
+M-112,2026-09-13 00:00,DATA_QUALITY,Intermittent readings and abnormal electrical jumps
