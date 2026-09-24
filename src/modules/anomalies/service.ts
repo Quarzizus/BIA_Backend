@@ -2,11 +2,13 @@ import type { PrismaClient } from "../../generated/prisma/client";
 import type { AnomalyStatus } from "../../generated/prisma/enums";
 import { ApiError } from "../../shared/errors";
 import {
+  anomalyInclude,
   createAnomalyRepository,
   type AnomalyFilters,
   type AnomalyWithRelations,
 } from "./repository";
 import { canTransition } from "./transition";
+import { deriveMeterStatus } from "./meter-status";
 import type { AnomalyDetail, AnomalyListItem } from "./model";
 
 function toListItem(anomaly: AnomalyWithRelations): AnomalyListItem {
@@ -75,7 +77,24 @@ export function createAnomalyService(prisma: PrismaClient): AnomalyService {
           `Cannot transition anomaly from ${anomaly.status} to ${status}`,
         );
       }
-      await repository.updateStatus(id, status);
+      // D4: persist the transition and recompute Meter.status from the most
+      // severe ACTIVE (not RESOLVED) anomaly in the SAME transaction, so the
+      // dashboard/meters KPIs never go stale.
+      await prisma.$transaction(async (tx) => {
+        const updated = await tx.anomaly.update({
+          where: { id },
+          data: { status },
+          include: anomalyInclude,
+        });
+        const active = await tx.anomaly.findMany({
+          where: { meterId: updated.meterId, status: { not: "RESOLVED" } },
+          select: { severity: true },
+        });
+        await tx.meter.update({
+          where: { id: updated.meterId },
+          data: { status: deriveMeterStatus(active.map((a) => a.severity)) },
+        });
+      });
       return detail(id);
     },
   };

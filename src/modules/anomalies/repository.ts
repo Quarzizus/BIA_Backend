@@ -18,7 +18,6 @@ export interface AnomalyFilters {
 export interface AnomalyRepository {
   list(filters: AnomalyFilters): Promise<AnomalyWithRelations[]>;
   findById(id: string): Promise<AnomalyWithRelations | null>;
-  updateStatus(id: string, status: AnomalyStatus): Promise<AnomalyWithRelations | null>;
 }
 
 export function createAnomalyRepository(prisma: PrismaClient): AnomalyRepository {
@@ -37,14 +36,6 @@ export function createAnomalyRepository(prisma: PrismaClient): AnomalyRepository
     async findById(id: string): Promise<AnomalyWithRelations | null> {
       return prisma.anomaly.findUnique({
         where: { id },
-        include: anomalyInclude,
-      });
-    },
-
-    async updateStatus(id: string, status: AnomalyStatus): Promise<AnomalyWithRelations | null> {
-      return prisma.anomaly.update({
-        where: { id },
-        data: { status },
         include: anomalyInclude,
       });
     },

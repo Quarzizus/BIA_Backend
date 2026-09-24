@@ -1,6 +1,7 @@
 import type { PrismaClient } from "../../generated/prisma/client";
 import { ApiError } from "../../shared/errors";
 import { logger } from "../../shared/logger";
+import { deriveMeterStatus } from "../anomalies/meter-status";
 import { computeBaseline } from "./baseline.calculator";
 import { classifyAnomaly, type MeterEvent } from "./classifier";
 import { consolidateDetections, detectMeter } from "./detector";
@@ -37,12 +38,6 @@ export interface AnalysisService {
   runAnalysis(runId: string, options?: { meterCodes?: string[] }): Promise<void>;
   getStatus(runId: string): Promise<AnalysisRunStatus>;
 }
-
-const RUNNING_STATUSES: Record<string, string> = {
-  HIGH: "CRITICAL",
-  MEDIUM: "ALERT",
-  LOW: "NORMAL",
-};
 
 export function createAnalysisService(
   prisma: PrismaClient,
@@ -225,10 +220,10 @@ export function createAnalysisService(
               },
             });
             // D4: meter status reflects the most severe OPEN anomaly of this run.
-            const meterStatus = RUNNING_STATUSES[finding.severity] ?? "NORMAL";
+            const meterStatus = deriveMeterStatus([finding.severity]);
             await tx.meter.update({
               where: { id: finding.meterId },
-              data: { status: meterStatus as never },
+              data: { status: meterStatus },
             });
           }
           await tx.analysisRun.update({
