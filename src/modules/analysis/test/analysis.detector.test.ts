@@ -2,14 +2,11 @@ import { describe, expect, test } from "bun:test";
 import {
   consolidateDetections,
   detectMeter,
-  type ConsolidatedDetection,
   type ReadingPoint,
 } from "../stages/analysis.detector";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const HOUR_MS = 60 * 60 * 1000;
 
-/** Hourly readings starting 2026-09-01 00:00 UTC. */
 function makeReadings(
   values: { c: number; v?: number; a?: number; pf?: number }[],
 ): ReadingPoint[] {
@@ -42,15 +39,13 @@ function baselineOf(readings: ReadingPoint[], days = 7) {
   };
 }
 
-/** 14 days of hourly readings: baseline c=50±1, then a sustained step to 75 from day 7. */
-function stepReadings(stepStartDay = 7, postLevel = 75): ReadingPoint[] {
+/** Estilo M-109: baseline c=44±7.6, spike sostenido a 110 desde 09-12 14:00 (días 12-13 completos). */
+function spikeReadings(): ReadingPoint[] {
   const values = [];
   for (let day = 0; day < 14; day++) {
     for (let hour = 0; hour < 24; hour++) {
-      const inStep = day >= stepStartDay;
-      const noise = (hour % 2 === 0 ? 1 : -1);
-      const c = inStep ? postLevel + noise : 50 + noise;
-      values.push({ c, a: c * 0.5, pf: 0.95 });
+      const spiking = day >= 12 || (day === 11 && hour >= 14);
+      values.push({ c: spiking ? 110 : 44 + (hour % 2 === 0 ? 1 : -1) * 7.6 });
     }
   }
   return makeReadings(values);
@@ -58,7 +53,7 @@ function stepReadings(stepStartDay = 7, postLevel = 75): ReadingPoint[] {
 
 describe("detectMeter — SPIKE", () => {
   test("detects a two-tailed negative drop (z=-5.09 style) with a contiguous ±1h range", () => {
-    // M-106-like: baseline ~56±9.6, 12h drop to ~10, then recovery.
+    // Estilo M-106: baseline ~56±9.6, caída de 12h a ~10, luego recuperación.
     const values = [];
     for (let day = 0; day < 14; day++) {
       for (let hour = 0; hour < 24; hour++) {
@@ -75,16 +70,16 @@ describe("detectMeter — SPIKE", () => {
     expect(spike).toBeDefined();
     expect(spike!.rangeStart.toISOString()).toBe("2026-09-08T00:00:00.000Z");
     expect(spike!.rangeEnd.toISOString()).toBe("2026-09-08T11:00:00.000Z");
-    // z = (10 - 56) / 9.6 = -4.79 → two-tailed |z| must be > 3.
+    // z = (10 - 56) / 9.6 = -4.79 → el |z| de dos colas debe ser > 3.
     expect(spike!.maxZ!).toBeGreaterThan(4);
   });
 
   test("detects a positive spike run and bounds it to the contiguous spike window", () => {
-    // M-109-like: baseline ~43.7, spike from 09-12 14:00 sustained to end.
+    // Estilo M-109: baseline ~43.7, spike desde 09-12 14:00 sostenido hasta el final.
     const values = [];
     for (let day = 0; day < 14; day++) {
       for (let hour = 0; hour < 24; hour++) {
-        const spiking = day >= 11 && hour >= 14; // day 11 = 09-12
+        const spiking = day >= 11 && hour >= 14;
         const c = spiking ? 110 : 44 + (hour % 2 === 0 ? 1 : -1) * 7.6;
         values.push({ c });
       }
@@ -115,7 +110,7 @@ describe("detectMeter — SPIKE", () => {
 
 describe("detectMeter — PERSISTENT_CHANGE", () => {
   test("detects a step whose first deviating 24h block starts 09-11 00:00 (M-104 rule)", () => {
-    // Baseline days 0-6 at ~48.7, days 7-9 normal (~48.7), day 10+ steps to ~71.
+    // Días de baseline 0-6 en ~48.7, días 7-9 normales (~48.7), día 10+ sube a ~71.
     const values = [];
     for (let day = 0; day < 14; day++) {
       for (let hour = 0; hour < 24; hour++) {
@@ -150,8 +145,8 @@ describe("detectMeter — PERSISTENT_CHANGE", () => {
   });
 
   test("a mid-day spike does not start a persistent change on the same day (M-109)", () => {
-    // Day 09-12: spike from 14:00 (10 deviating hours < 12) → rejected;
-    // days 09-13 and 09-14 fully elevated → change starts 09-13 00:00.
+    // Día 09-12: spike desde 14:00 (10 horas desviadas < 12) → rechazado;
+    // los días 09-13 y 09-14 completamente elevados → el cambio empieza 09-13 00:00.
     const values = [];
     for (let day = 0; day < 14; day++) {
       for (let hour = 0; hour < 24; hour++) {
@@ -164,7 +159,7 @@ describe("detectMeter — PERSISTENT_CHANGE", () => {
     const baseline = baselineOf(readings);
     const detections = detectMeter(readings, baseline);
     const persistent = detections.find((d) => d.type === "PERSISTENT_CHANGE");
-    // The spike day has only 10 consecutive deviating hours (< 12) → change starts next day.
+    // El día del spike solo tiene 10 horas desviadas consecutivas (< 12) → el cambio empieza al día siguiente.
     expect(persistent).toBeDefined();
     expect(persistent!.rangeStart.toISOString()).toBe("2026-09-13T00:00:00.000Z");
   });
@@ -172,11 +167,11 @@ describe("detectMeter — PERSISTENT_CHANGE", () => {
 
 describe("detectMeter — DATA_QUALITY", () => {
   test("stable consumption with voltage/pf std > 5x baseline triggers DQ over the affected days", () => {
-    // M-112-like: consumption stable ~27.6, but voltage and pf wild on 09-13/09-14.
+    // Estilo M-112: consumo estable ~27.6, pero voltaje y pf salvajes en 09-13/09-14.
     const values = [];
     for (let day = 0; day < 14; day++) {
       for (let hour = 0; hour < 24; hour++) {
-        const wild = day >= 12; // 09-13 and 09-14
+        const wild = day >= 12;
         values.push({
           c: 27.6 + (hour % 2 === 0 ? 0.1 : -0.1),
           v: wild ? 220 + (hour % 2 === 0 ? 10 : -10) : 221,
@@ -193,7 +188,7 @@ describe("detectMeter — DATA_QUALITY", () => {
     expect(dq).toBeDefined();
     expect(dq!.rangeStart.toISOString()).toBe("2026-09-13T00:00:00.000Z");
     expect(dq!.rangeEnd.toISOString()).toBe("2026-09-14T23:00:00.000Z");
-    // Voltage std ratio ≈ 10 / 0.5 > 5x.
+    // Razón de std de voltaje ≈ 10 / 0.5 > 5x.
     expect(dq!.extras!.voltage_sd_ratio).toBeGreaterThan(5);
     expect(dq!.extras!.power_factor_sd_ratio).toBeGreaterThan(5);
   });
@@ -232,7 +227,9 @@ describe("consolidateDetections", () => {
         variationPct: 169.2,
       },
     ];
-    const consolidated = consolidateDetections(detections);
+    const readings = spikeReadings();
+    const baseline = baselineOf(readings);
+    const consolidated = consolidateDetections(detections, readings, baseline);
     expect(consolidated).not.toBeNull();
     expect(consolidated!.detectionType).toBe("SPIKE,PERSISTENT_CHANGE");
     expect(consolidated!.rangeStart.toISOString()).toBe("2026-09-12T14:00:00.000Z");
@@ -245,7 +242,13 @@ describe("consolidateDetections", () => {
   });
 
   test("returns null for an empty detection list", () => {
-    expect(consolidateDetections([])).toBeNull();
+    const baseline = {
+      consumption_kwh: { mean: 44, std: 7.6 },
+      voltage_v: { mean: 220, std: 1 },
+      current_a: { mean: 22, std: 3.8 },
+      power_factor: { mean: 0.95, std: 0.01 },
+    };
+    expect(consolidateDetections([], [], baseline)).toBeNull();
   });
 
   test("detectMeter returns zero detections for clean meters", () => {
@@ -259,6 +262,56 @@ describe("consolidateDetections", () => {
     const baseline = baselineOf(readings);
     const detections = detectMeter(readings, baseline);
     expect(detections).toHaveLength(0);
-    expect(consolidateDetections(detections)).toBeNull();
+    expect(consolidateDetections(detections, readings, baseline)).toBeNull();
+  });
+});
+
+describe("consolidateDetections — per_variable evidence", () => {
+  test("pins baseline vs recent comparison for the affected variable (M-109 style)", () => {
+    const readings = spikeReadings();
+    const baseline = baselineOf(readings);
+    const consolidated = consolidateDetections(
+      detectMeter(readings, baseline),
+      readings,
+      baseline,
+    );
+    expect(consolidated).not.toBeNull();
+
+    const perVariable = consolidated!.signals.per_variable;
+    // Baseline de los primeros 7 días: media 44 exacta (44 ± 7.6 alternado).
+    expect(perVariable.consumption_kwh!.baseline_mean).toBeCloseTo(44, 0);
+    // Rango consolidado [09-12 14:00, 09-14 23:00]: todas las lecturas en 110.
+    expect(perVariable.consumption_kwh!.recent_mean).toBeCloseTo(110, 0);
+    expect(perVariable.consumption_kwh!.variation_pct).toBeCloseTo(150, 0);
+    // max |z| = |(110 - 44) / 7.6| ≈ 8.68, calculado con la std poblacional del baseline.
+    expect(perVariable.consumption_kwh!.max_z).toBeCloseTo(8.68, 1);
+  });
+
+  test("max_z is null when the baseline std is 0 (avoids Infinity)", () => {
+    // Baseline con power_factor.std exactamente 0: la división por std daría
+    // Infinity, así que el max_z de esa variable debe ser null.
+    const readings = spikeReadings();
+    const baseline = {
+      consumption_kwh: { mean: 44, std: 7.6 },
+      voltage_v: { mean: 220, std: 1 },
+      current_a: { mean: 22, std: 3.8 },
+      power_factor: { mean: 0.95, std: 0 },
+    };
+    const detections = [
+      {
+        type: "SPIKE" as const,
+        rangeStart: new Date("2026-09-12T14:00:00.000Z"),
+        rangeEnd: new Date("2026-09-14T23:00:00.000Z"),
+        variables: ["consumption_kwh", "current_a", "power_factor"],
+        maxZ: 8.68,
+        variationPct: 150,
+      },
+    ];
+    const consolidated = consolidateDetections(detections, readings, baseline);
+    expect(consolidated).not.toBeNull();
+    const pf = consolidated!.signals.per_variable.power_factor!;
+    expect(pf.baseline_mean).toBe(0.95);
+    expect(pf.recent_mean).toBeCloseTo(0.95, 1);
+    expect(pf.max_z).toBeNull();
   });
 });

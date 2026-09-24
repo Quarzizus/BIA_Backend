@@ -6,32 +6,45 @@ import {
   PERSISTENT_DEVIATION,
   SUSTAINED_HOURS,
   Z_THRESHOLD,
+  type ConsolidatedSignals,
   type Detection,
   type ConsolidatedDetection,
   type MeterBaseline,
   type ReadingPoint,
+  type VariableEvidence,
 } from "../analysis.domain";
 
 /**
- * Stage 2 — Detector.
+ * Etapa 2 — Detector.
  *
- * Pure signal detection over a meter's full reading history:
- *  - SPIKE: contiguous run (hourly, ±1h) where two-tailed |z| > 3 on consumption.
- *  - PERSISTENT_CHANGE: first day-aligned 24h block whose mean deviates >20% vs
- *    baseline, sustained (>=12 consecutive deviating readings in-block AND the
- *    following day block keeps deviating in the same direction). The next-day
- *    requirement excludes transient dips like M-106's 12h scheduled outage.
- *  - DATA_QUALITY: day blocks where consumption stays within 5% of baseline but
- *    voltage or power-factor std exceeds 5x the baseline std (electrical incoherence).
+ * Detección pura de señales sobre el historial completo de lecturas de un
+ * medidor:
+ *  - SPIKE: racha contigua (horaria, ±1h) donde |z| de dos colas > 3 en consumo.
+ *  - PERSISTENT_CHANGE: primer bloque de 24h alineado al día cuya media se
+ *    desvía >20% vs baseline, sostenido (>=12 lecturas desviadas consecutivas
+ *    dentro del bloque Y el bloque del día siguiente sigue desviándose en la
+ *    misma dirección). El requisito del día siguiente excluye caídas transitorias
+ *    como el corte programado de 12h de M-106.
+ *  - DATA_QUALITY: bloques de día donde el consumo se mantiene dentro del 5%
+ *    del baseline pero la std de voltaje o factor de potencia supera 5x la std
+ *    del baseline (incoherencia eléctrica).
  *
- * Types and constants live in analysis.domain; this file keeps the signal math.
+ * Los tipos y constantes viven en analysis.domain; este archivo mantiene la
+ * matemática de señales.
  */
 
-export type { ConsolidatedDetection, Detection, DetectionType, ReadingPoint } from "../analysis.domain";
+export type {
+  ConsolidatedDetection,
+  ConsolidatedSignals,
+  Detection,
+  DetectionType,
+  ReadingPoint,
+  VariableEvidence,
+} from "../analysis.domain";
 
 type Signal = keyof MeterBaseline;
 
-/** Signal-name → value picker (single place instead of nested ternaries). */
+/** Picker nombre-de-señal → valor (un solo lugar en vez de ternarios anidados). */
 const SIGNAL_PICKERS: Record<Signal, (reading: ReadingPoint) => number> = {
   consumption_kwh: (reading) => reading.consumptionKwh,
   voltage_v: (reading) => reading.voltageV,
@@ -65,7 +78,6 @@ function groupByDay(readings: ReadingPoint[]): Map<number, ReadingPoint[]> {
   return groups;
 }
 
-/** SPIKE: contiguous runs of readings with two-tailed |z| > 3 on consumption. */
 function detectSpikes(readings: ReadingPoint[], baseline: MeterBaseline): Detection[] {
   const { mean: mu, std: sigma } = baseline.consumption_kwh;
   if (mu === null || sigma === null || sigma === 0) return [];
@@ -118,10 +130,11 @@ function detectSpikes(readings: ReadingPoint[], baseline: MeterBaseline): Detect
 }
 
 /**
- * PERSISTENT_CHANGE: day-aligned 24h blocks. The first block whose mean deviates
- * >20% vs baseline, with >=12 consecutive in-block deviating readings AND a
- * following day block deviating in the same direction, opens a change window
- * that extends through consecutive deviating day blocks.
+ * PERSISTENT_CHANGE: bloques de 24h alineados al día. El primer bloque cuya
+ * media se desvía >20% vs baseline, con >=12 lecturas desviadas consecutivas
+ * dentro del bloque Y un bloque al día siguiente desviándose en la misma
+ * dirección, abre una ventana de cambio que se extiende por los bloques de día
+ * consecutivos desviados.
  */
 function detectPersistentChange(readings: ReadingPoint[], baseline: MeterBaseline): Detection[] {
   const { mean: mu, std: sigma } = baseline.consumption_kwh;
@@ -139,11 +152,12 @@ function detectPersistentChange(readings: ReadingPoint[], baseline: MeterBaselin
     return (value - mu) / mu;
   };
 
-  // Candidate: a day block whose mean deviates >20% with >=12 consecutive
-  // in-block readings deviating in the same direction, sustained by the next day.
+  // Candidato: un bloque de día cuya media se desvía >20% con >=12 lecturas
+  // consecutivas dentro del bloque desviándose en la misma dirección, sostenido
+  // por el día siguiente.
   let changeStartKey: number | null = null;
   for (const key of dayKeys) {
-    if (key <= firstDay + 6 * DAY_MS) continue; // baseline window excluded
+    if (key <= firstDay + 6 * DAY_MS) continue; // se excluye la ventana de baseline
     const dev = deviation(blockMean(key));
     if (dev === null || Math.abs(dev) <= PERSISTENT_DEVIATION) continue;
     const direction = Math.sign(dev);
@@ -177,7 +191,7 @@ function detectPersistentChange(readings: ReadingPoint[], baseline: MeterBaselin
 
   if (changeStartKey === null) return [];
 
-  // Extend the window through consecutive deviating day blocks.
+  // Extiende la ventana por los bloques de día consecutivos desviados.
   let changeEndKey = changeStartKey;
   const direction = Math.sign(deviation(blockMean(changeStartKey)) ?? 0);
   for (const key of dayKeys) {
@@ -195,7 +209,7 @@ function detectPersistentChange(readings: ReadingPoint[], baseline: MeterBaselin
   const changeEnd = changeBucket?.[changeBucket.length - 1]!.timestamp;
   if (!changeStart || !changeEnd) return [];
 
-  // Variables: signals whose post-change mean deviates >20% vs baseline.
+  // Variables: señales cuya media post-cambio se desvía >20% vs baseline.
   const postReadings = readings.filter((r) => r.timestamp.getTime() >= changeStart.getTime());
   const variables = ["consumption_kwh", "current_a", "power_factor", "voltage_v"].filter(
     (signal) => {
@@ -227,8 +241,9 @@ function detectPersistentChange(readings: ReadingPoint[], baseline: MeterBaselin
 }
 
 /**
- * DATA_QUALITY: day blocks where consumption is stable (<5% vs baseline) yet
- * voltage or power-factor std exceeds 5x baseline (electrical incoherence).
+ * DATA_QUALITY: bloques de día donde el consumo es estable (<5% vs baseline)
+ * pero la std de voltaje o factor de potencia supera 5x el baseline
+ * (incoherencia eléctrica).
  */
 function detectDataQuality(readings: ReadingPoint[], baseline: MeterBaseline): Detection[] {
   const { mean: mu } = baseline.consumption_kwh;
@@ -262,8 +277,8 @@ function detectDataQuality(readings: ReadingPoint[], baseline: MeterBaseline): D
   const maxVoltageRatio = Math.max(...dqDays.map((d) => d.voltageRatio));
   const maxPfRatio = Math.max(...dqDays.map((d) => d.pfRatio));
 
-  // Day-mean over baseline-mean ratio (≈100 for stable consumption). The bucket
-  // is never empty, but keep the null-safe fallback that the original had.
+  // Razón media-del-día sobre media-del-baseline (≈100 para consumo estable). El
+  // bucket nunca está vacío, pero se conserva el fallback null-safe del original.
   const dayMean = mean(signalValues("consumption_kwh", startBucket));
 
   return [
@@ -279,7 +294,6 @@ function detectDataQuality(readings: ReadingPoint[], baseline: MeterBaseline): D
   ];
 }
 
-/** Runs all three detectors over a meter's readings. */
 export function detectMeter(
   readings: ReadingPoint[],
   baseline: MeterBaseline,
@@ -292,11 +306,50 @@ export function detectMeter(
 }
 
 /**
- * Consolidates a meter's detections into ONE anomaly record per run: union
- * range, union variables, max |z|, comma-joined detection types.
+ * Evidencia por variable sobre el rango consolidado [rangeStart, rangeEnd]:
+ * media del baseline (primeros 7 días), media reciente de las lecturas dentro
+ * del rango, variación porcentual y max |z| (std poblacional del baseline).
+ * Null-safe: variación null si la media del baseline es null/0; max_z null si
+ * la std del baseline es null/0 (evita Infinity).
+ */
+function computeVariableEvidence(
+  signal: Signal,
+  rangeReadings: ReadingPoint[],
+  baseline: MeterBaseline,
+): VariableEvidence {
+  const stats = baseline[signal];
+  const baselineMean = stats.mean;
+  const recentMean = mean(rangeReadings.map(SIGNAL_PICKERS[signal]));
+  const variationPct =
+    baselineMean !== null && baselineMean !== 0 && recentMean !== null
+      ? ((recentMean - baselineMean) / baselineMean) * 100
+      : null;
+  const maxZ =
+    baselineMean !== null && stats.std !== null && stats.std !== 0 && rangeReadings.length > 0
+      ? Math.max(
+          ...rangeReadings.map(
+            (r) => Math.abs(zScore(SIGNAL_PICKERS[signal](r), baselineMean, stats.std) ?? 0),
+          ),
+        )
+      : null;
+
+  return {
+    baseline_mean: baselineMean,
+    recent_mean: recentMean,
+    variation_pct: variationPct,
+    max_z: maxZ,
+  };
+}
+
+/**
+ * Consolida las detecciones de un medidor en UNA anomalía por run: unión de
+ * rangos, unión de variables, max |z|, tipos de detección unidos por coma y la
+ * evidencia por variable (baseline vs rango afectado) sobre las lecturas.
  */
 export function consolidateDetections(
   detections: Detection[],
+  readings: ReadingPoint[],
+  baseline: MeterBaseline,
 ): ConsolidatedDetection | null {
   if (detections.length === 0) return null;
 
@@ -323,6 +376,24 @@ export function consolidateDetections(
   );
   const extras = Object.assign({}, ...detections.map((d) => d.extras ?? {}));
 
+  // Evidencia por variable sobre el rango consolidado [rangeStart, rangeEnd].
+  const rangeReadings = readings.filter(
+    (r) => r.timestamp.getTime() >= rangeStart.getTime() && r.timestamp.getTime() <= rangeEnd.getTime(),
+  );
+  const perVariable: Record<string, VariableEvidence> = {};
+  for (const variable of variables) {
+    if (!Object.prototype.hasOwnProperty.call(SIGNAL_PICKERS, variable)) continue;
+    perVariable[variable] = computeVariableEvidence(variable as Signal, rangeReadings, baseline);
+  }
+
+  const signals: ConsolidatedSignals = {
+    max_z: maxZ,
+    variation_pct: variationPct,
+    variables,
+    per_variable: perVariable,
+    ...extras,
+  };
+
   return {
     detectionType: types.join(","),
     rangeStart,
@@ -330,11 +401,6 @@ export function consolidateDetections(
     variables,
     maxZ,
     variationPct,
-    signals: {
-      max_z: maxZ,
-      variation_pct: variationPct,
-      variables,
-      ...extras,
-    },
+    signals,
   };
 }

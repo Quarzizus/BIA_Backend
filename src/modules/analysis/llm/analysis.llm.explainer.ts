@@ -3,11 +3,11 @@ import { SYSTEM_PROMPT } from "../../../shared/domain/llm";
 import type { ExplainInput, ExplainOutput } from "../../../shared/domain/llm";
 
 /**
- * LLM explanation builder (design D7/D8): builds the Spanish prompt for a
- * confirmed anomaly and validates the model's JSON reply. Pure functions,
- * testable without any network — the HTTP transport lives in llm.client.ts.
+ * Builder de explicaciones LLM (diseño D7/D8): construye el prompt en español
+ * para una anomalía confirmada y valida la respuesta JSON del modelo. Funciones
+ * puras, testeables sin red — el transporte HTTP vive en llm.client.ts.
  *
- * The system prompt and I/O contracts are shared via shared/domain/llm.
+ * El system prompt y los contratos I/O se comparten vía shared/domain/llm.
  */
 
 export type { ExplainInput, ExplainOutput };
@@ -17,10 +17,36 @@ const explanationSchema = z.object({
   recommended_action: z.string().min(1),
 });
 
-/** Builds the chat messages for explaining a confirmed anomaly. */
+/**
+ * Líneas legibles de evidencia por variable (baseline → reciente) para que el
+ * modelo cite los números concretos. Sin evidencia → lista vacía (el prompt
+ * sigue incluyendo las señales crudas en JSON).
+ */
+function formatVariableEvidence(signals: Record<string, unknown>): string[] {
+  const perVariable = signals.per_variable;
+  if (typeof perVariable !== "object" || perVariable === null) return [];
+
+  const lines: string[] = [];
+  for (const [variable, raw] of Object.entries(perVariable as Record<string, unknown>)) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const evidence = raw as Record<string, unknown>;
+    const fmt = (value: unknown): string =>
+      typeof value === "number" && Number.isFinite(value) ? value.toFixed(1) : "n/d";
+    const variation =
+      typeof evidence.variation_pct === "number" && Number.isFinite(evidence.variation_pct)
+        ? `${evidence.variation_pct >= 0 ? "+" : ""}${evidence.variation_pct.toFixed(1)}%`
+        : "n/d";
+    lines.push(
+      `${variable}: baseline ${fmt(evidence.baseline_mean)} → reciente ${fmt(evidence.recent_mean)} (${variation}), max_z ${fmt(evidence.max_z)}`,
+    );
+  }
+  return lines;
+}
+
 export function buildExplainPrompt(
   anomaly: ExplainInput,
 ): { role: string; content: string }[] {
+  const evidenceLines = formatVariableEvidence(anomaly.signals);
   return [
     { role: "system", content: SYSTEM_PROMPT },
     {
@@ -29,12 +55,14 @@ export function buildExplainPrompt(
         "Explica la siguiente anomalía confirmada: genera reason (por qué es una anomalía) y recommended_action (acción recomendada) en español.",
         "Datos del caso:",
         JSON.stringify(anomaly, null, 2),
+        ...(evidenceLines.length > 0
+          ? ["", "Evidencia por variable (baseline → reciente):", ...evidenceLines]
+          : []),
       ].join("\n"),
     },
   ];
 }
 
-/** Validates the LLM's JSON reply and returns the explanation contract. */
 export function parseExplanation(content: string): ExplainOutput {
   let raw: unknown;
   try {

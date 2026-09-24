@@ -6,7 +6,19 @@ const anomaly = {
   type: "REAL_ANOMALY",
   severity: "HIGH",
   detectionType: "SPIKE,PERSISTENT_CHANGE",
-  signals: { max_z: 8.79, variation_pct: 152.5 },
+  signals: {
+    max_z: 8.79,
+    variation_pct: 152.5,
+    variables: ["consumption_kwh", "current_a", "power_factor"],
+    per_variable: {
+      consumption_kwh: {
+        baseline_mean: 43.7,
+        recent_mean: 92.8,
+        variation_pct: 112.3,
+        max_z: 9.73,
+      },
+    },
+  },
   rangeStart: "2026-09-12T14:00:00.000Z",
   rangeEnd: "2026-09-14T23:00:00.000Z",
 };
@@ -21,6 +33,19 @@ describe("buildExplainPrompt", () => {
     expect(messages[1]!.content).toContain("REAL_ANOMALY");
     expect(messages[1]!.content).toContain("SPIKE,PERSISTENT_CHANGE");
     expect(messages[1]!.content).toContain('"max_z": 8.79');
+  });
+
+  test("embeds readable per-variable evidence lines (baseline → reciente)", () => {
+    const messages = buildExplainPrompt(anomaly);
+    expect(messages[1]!.content).toContain("Evidencia por variable (baseline → reciente):");
+    expect(messages[1]!.content).toContain(
+      "consumption_kwh: baseline 43.7 → reciente 92.8 (+112.3%), max_z 9.7",
+    );
+  });
+
+  test("omits the evidence section when per_variable is absent", () => {
+    const messages = buildExplainPrompt({ ...anomaly, signals: { max_z: 8.79 } });
+    expect(messages[1]!.content).not.toContain("Evidencia por variable");
   });
 });
 

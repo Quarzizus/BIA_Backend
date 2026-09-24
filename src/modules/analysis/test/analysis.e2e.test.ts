@@ -5,14 +5,15 @@ import {
   createTestPrisma,
   provisionTestDb,
   seedTestDb,
-} from "../../../testing/analysisTestDb";
+} from "../../../testing/testDb";
 
-const prisma = createTestPrisma();
+const prisma = createTestPrisma("bia_test_analysis");
 
 /**
- * Fake LLM (design D8): deterministic Spanish outputs, no network. The E2E runs
- * against the isolated bia_test DB seeded with the real 12/4032/4 dataset, so
- * the four spec ground truths (M-109/104/106/112) are exercised on real data.
+ * LLM falso (diseño D8): salidas deterministas en español, sin red. El E2E corre
+ * contra la base aislada bia_test_analysis sembrada con el dataset real
+ * 12/4032/4, de modo que los cuatro ground truths de la spec (M-109/104/106/112)
+ * se ejercitan sobre datos reales.
  */
 function fakeLlm(): LlmClient {
   return {
@@ -55,7 +56,7 @@ async function waitForCompletion(runId: string, timeoutMs = 15000): Promise<Reco
 }
 
 beforeAll(async () => {
-  await provisionTestDb();
+  await provisionTestDb("bia_test_analysis");
   await seedTestDb(prisma);
   const app = createApp(prisma, { analysis: { ...VALID_ENV, llm: fakeLlm() } });
   server = app.listen(0);
@@ -79,7 +80,7 @@ describe("E2E pipeline on real seeded data (spec analysis-pipeline)", () => {
     expect(completed.anomaly_count).toBe(4);
     expect(completed.llm_used).toBe(true);
 
-    // 4 anomalies, one per affected meter (spec anomalies-api scenario).
+    // 4 anomalías, una por medidor afectado (escenario anomalies-api de la spec).
     const anomalies = await prisma.anomaly.findMany({
       where: { analysisRunId: analysis_id },
       include: { meter: true, relatedEvent: true },
@@ -88,7 +89,7 @@ describe("E2E pipeline on real seeded data (spec analysis-pipeline)", () => {
     expect(anomalies).toHaveLength(4);
     const byMeter = new Map(anomalies.map((a) => [a.meter!.meterId, a]));
 
-    // M-109 → REAL_ANOMALY/HIGH (spike z=8.79 + persistent, event UNKNOWN).
+    // M-109 → REAL_ANOMALY/HIGH (spike z=8.79 + persistente, evento UNKNOWN).
     const m109 = byMeter.get("M-109")!;
     expect(m109.type).toBe("REAL_ANOMALY");
     expect(m109.severity).toBe("HIGH");
@@ -101,14 +102,29 @@ describe("E2E pipeline on real seeded data (spec analysis-pipeline)", () => {
     expect((m109.signals as { variables: string[] }).variables).toContain("consumption_kwh");
     expect((m109.signals as { variables: string[] }).variables).toContain("power_factor");
 
-    // M-104 → EXPLAINABLE_ANOMALY/MEDIUM, change point 09-11 00:00.
+    // Evidencia enriquecida: per_variable compara baseline (primeros 7 días) vs
+    // el rango afectado [09-12 14:00, 09-14 23:00] con números reales del dataset.
+    const m109Signals = m109.signals as {
+      variables: string[];
+      per_variable: Record<
+        string,
+        { baseline_mean: number; recent_mean: number; variation_pct: number; max_z: number }
+      >;
+    };
+    expect(m109Signals.variables).toContain("current_a");
+    expect(m109Signals.per_variable.consumption_kwh!.baseline_mean).toBeCloseTo(43.7, 1);
+    expect(m109Signals.per_variable.consumption_kwh!.recent_mean).toBeGreaterThan(80);
+    expect(m109Signals.per_variable.consumption_kwh!.variation_pct).toBeGreaterThan(100);
+    expect(m109Signals.per_variable.consumption_kwh!.max_z).toBeCloseTo(9.73, 1);
+
+    // M-104 → EXPLAINABLE_ANOMALY/MEDIUM, punto de cambio 09-11 00:00.
     const m104 = byMeter.get("M-104")!;
     expect(m104.type).toBe("EXPLAINABLE_ANOMALY");
     expect(m104.severity).toBe("MEDIUM");
     expect(m104.rangeStart.toISOString()).toBe("2026-09-11T00:00:00.000Z");
     expect(m104.relatedEvent?.eventType).toBe("OPERATIONAL_CHANGE");
 
-    // M-106 → FALSE_POSITIVE/LOW, drop window covers 09-08 (two-tailed rule).
+    // M-106 → FALSE_POSITIVE/LOW, la ventana de caída cubre 09-08 (regla de dos colas).
     const m106 = byMeter.get("M-106")!;
     expect(m106.type).toBe("FALSE_POSITIVE");
     expect(m106.severity).toBe("LOW");
@@ -125,13 +141,30 @@ describe("E2E pipeline on real seeded data (spec analysis-pipeline)", () => {
     expect(m112.rangeEnd.toISOString()).toBe("2026-09-14T23:00:00.000Z");
     expect(m112.relatedEvent?.eventType).toBe("DATA_QUALITY");
 
-    // Spanish explanations for every anomaly.
+    // M-112: per_variable cubre voltage_v/power_factor y los extras de DQ siguen intactos.
+    const m112Signals = m112.signals as {
+      per_variable: Record<
+        string,
+        { baseline_mean: number; recent_mean: number; variation_pct: number; max_z: number }
+      >;
+      voltage_sd_ratio: number;
+      power_factor_sd_ratio: number;
+    };
+    expect(m112Signals.per_variable.voltage_v).toBeDefined();
+    expect(m112Signals.per_variable.power_factor).toBeDefined();
+    expect(m112Signals.per_variable.voltage_v!.baseline_mean).toBeCloseTo(220.97, 1);
+    expect(m112Signals.per_variable.voltage_v!.max_z).toBeGreaterThan(10);
+    expect(m112Signals.per_variable.power_factor!.max_z).toBeGreaterThan(10);
+    expect(m112Signals.voltage_sd_ratio).toBeGreaterThan(5);
+    expect(m112Signals.power_factor_sd_ratio).toBeGreaterThan(5);
+
+    // Explicaciones en español para cada anomalía.
     for (const anomaly of anomalies) {
       expect(anomaly.reason).toContain("anómalo");
       expect(anomaly.recommendedAction).toContain("medidor");
     }
 
-    // Meter status recomputed (D4): HIGH→CRITICAL, MEDIUM→ALERT.
+    // Status de medidor recalculado (D4): HIGH→CRITICAL, MEDIUM→ALERT.
     const m109Status = await prisma.meter.findUnique({ where: { id: m109.meterId } });
     expect(m109Status!.status).toBe("CRITICAL");
     const m104Status = await prisma.meter.findUnique({ where: { id: m104.meterId } });
@@ -160,13 +193,17 @@ describe("E2E pipeline on real seeded data (spec analysis-pipeline)", () => {
     const res = await fetch(`${baseUrl}/dashboard/summary`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, any>;
+    // Cotas inferiores (no exactas): analysis.service.test.ts comparte la base
+    // bia_test_analysis y corre en paralelo, así que sus fixtures (p. ej. el
+    // M-PZ1 CRITICAL de su run) pueden sumarse a estos conteos en cualquier
+    // instante.
     expect(body.meters_critical).toBeGreaterThanOrEqual(1);
     expect(body.open_by_severity.HIGH).toBeGreaterThanOrEqual(2);
     expect(body.open_by_severity.MEDIUM).toBeGreaterThanOrEqual(1);
   });
 
   test("second POST while a run is RUNNING → 409 ANALYSIS_IN_PROGRESS", async () => {
-    // Occupy the single-running lock directly.
+    // Ocupar el lock de run único directamente.
     const lockRun = await prisma.analysisRun.create({
       data: { status: "RUNNING", lockToken: "single" },
     });
