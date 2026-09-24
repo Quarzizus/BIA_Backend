@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { getPrisma } from "../../config/database";
-import { startTestServer, type TestServer } from "../../testing/testServer";
-import { createReadingsRouter } from "./routes";
+import { getPrisma } from "../../../config/database";
+import { startTestServer, type TestServer } from "../../../testing/testServer";
+import { createReadingsRouter } from "../reading.routes";
 
 const prisma = getPrisma();
 let server: TestServer;

@@ -2,7 +2,7 @@ import { Router } from "express";
 import type { PrismaClient } from "../../generated/prisma/client";
 import { ApiError } from "../../shared/errors";
 import { createAnalysisService, type AnalysisDeps, type AnalysisService } from "./analysis.service";
-import type { LlmClient } from "./llm.client";
+import type { LlmClient } from "./analysis.llm.client";
 import { z } from "zod";
 
 const analysisIdParam = z.object({

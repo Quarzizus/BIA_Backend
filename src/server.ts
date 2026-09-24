@@ -3,7 +3,7 @@ import { loadEnv } from "./config/env";
 import { getPrisma, pingDatabase } from "./config/database";
 import { logger } from "./shared/logger";
 import { createApp } from "./app";
-import { createLlmClient } from "./modules/analysis/llm.client";
+import { createLlmClient } from "./modules/analysis/analysis.llm.client";
 
 /**
  * Boot sweep (design D3): orphaned RUNNING analysis runs (e.g. after a crash)

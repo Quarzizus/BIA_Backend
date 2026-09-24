@@ -6,7 +6,7 @@ import {
   populationStd,
   type BaselineReading,
   type BaselineStats,
-} from "../meters/baseline";
+} from "../meters/meter.baseline";
 
 /**
  * Pipeline-facing baseline calculator (Stage 1). Reuses the pure statistical

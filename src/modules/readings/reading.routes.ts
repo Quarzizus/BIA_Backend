@@ -1,8 +1,8 @@
 import { Router } from "express";
 import type { PrismaClient } from "../../generated/prisma/client";
 import { ApiError, formatZodIssues } from "../../shared/errors";
-import { meterIdParam, readingsQuery } from "./model";
-import { createReadingsService } from "./service";
+import { meterIdParam, readingsQuery } from "./reading.model";
+import { createReadingsService } from "./reading.service";
 
 export function createReadingsRouter(prisma: PrismaClient): Router {
   const router = Router();

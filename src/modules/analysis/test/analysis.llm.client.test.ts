@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { createLlmClient, type LlmEnv } from "./llm.client";
+import { createLlmClient, type LlmEnv } from "../analysis.llm.client";
 
 const env: LlmEnv = {
   AI_API_KEY: "test-key",

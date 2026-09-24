@@ -1,11 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { createApp } from "../../app";
-import type { LlmClient } from "./llm.client";
+import { createApp } from "../../../app";
+import type { LlmClient } from "../analysis.llm.client";
 import {
   createTestPrisma,
   provisionTestDb,
   seedTestDb,
-} from "../../testing/analysisTestDb";
+} from "../../../testing/analysisTestDb";
 
 const prisma = createTestPrisma();
 

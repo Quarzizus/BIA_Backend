@@ -1,6 +1,6 @@
 import { Router } from "express";
 import type { PrismaClient } from "../../generated/prisma/client";
-import { createDashboardService } from "./service";
+import { createDashboardService } from "./dashboard.service";
 
 export function createDashboardRouter(prisma: PrismaClient): Router {
   const router = Router();

@@ -1,4 +1,4 @@
-import type { MeterBaseline } from "./baseline.calculator";
+import type { MeterBaseline } from "./analysis.baseline.calculator";
 
 /**
  * Stage 2 — Detector.

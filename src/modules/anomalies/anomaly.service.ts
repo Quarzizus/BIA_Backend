@@ -6,10 +6,10 @@ import {
   createAnomalyRepository,
   type AnomalyFilters,
   type AnomalyWithRelations,
-} from "./repository";
-import { canTransition } from "./transition";
-import { deriveMeterStatus } from "./meter-status";
-import type { AnomalyDetail, AnomalyListItem } from "./model";
+} from "./anomaly.repository";
+import { canTransition } from "./anomaly.transition";
+import { deriveMeterStatus } from "./anomaly.meter-status";
+import type { AnomalyDetail, AnomalyListItem } from "./anomaly.model";
 
 function toListItem(anomaly: AnomalyWithRelations): AnomalyListItem {
   return {

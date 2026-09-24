@@ -1,8 +1,8 @@
 import type { PrismaClient } from "../../generated/prisma/client";
 import type { Reading } from "../../generated/prisma/client";
 import { ApiError } from "../../shared/errors";
-import { createReadingsRepository } from "./repository";
-import type { ReadingDto } from "./model";
+import { createReadingsRepository } from "./reading.repository";
+import type { ReadingDto } from "./reading.model";
 
 function toReadingDto(reading: Reading): ReadingDto {
   return {

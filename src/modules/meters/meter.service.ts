@@ -1,9 +1,9 @@
 import type { PrismaClient } from "../../generated/prisma/client";
 import type { Meter, Reading } from "../../generated/prisma/client";
 import { ApiError } from "../../shared/errors";
-import { computeBaselineStats, variationPct } from "./baseline";
-import { createMeterRepository } from "./repository";
-import type { MeterDetail, MeterSummary, ReadingDto } from "./model";
+import { computeBaselineStats, variationPct } from "./meter.baseline";
+import { createMeterRepository } from "./meter.repository";
+import type { MeterDetail, MeterSummary, ReadingDto } from "./meter.model";
 
 function toReadingDto(reading: Reading): ReadingDto {
   return {

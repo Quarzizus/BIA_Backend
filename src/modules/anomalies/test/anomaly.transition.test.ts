@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { canTransition } from "./transition";
+import { canTransition } from "../anomaly.transition";
 
 describe("canTransition", () => {
   test("allows OPEN to INVESTIGATING", () => {

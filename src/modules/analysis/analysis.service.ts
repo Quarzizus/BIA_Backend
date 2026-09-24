@@ -1,11 +1,11 @@
 import type { PrismaClient } from "../../generated/prisma/client";
 import { ApiError } from "../../shared/errors";
 import { logger } from "../../shared/logger";
-import { deriveMeterStatus } from "../anomalies/meter-status";
-import { computeBaseline } from "./baseline.calculator";
-import { classifyAnomaly, type MeterEvent } from "./classifier";
-import { consolidateDetections, detectMeter } from "./detector";
-import type { LlmClient } from "./llm.client";
+import { deriveMeterStatus } from "../anomalies/anomaly.meter-status";
+import { computeBaseline } from "./analysis.baseline.calculator";
+import { classifyAnomaly, type MeterEvent } from "./analysis.classifier";
+import { consolidateDetections, detectMeter } from "./analysis.detector";
+import type { LlmClient } from "./analysis.llm.client";
 
 /**
  * Analysis orchestration (tasks 3.7/3.8):

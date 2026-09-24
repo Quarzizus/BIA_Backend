@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { buildExplainPrompt, parseExplanation } from "./llm.explainer";
+import { buildExplainPrompt, parseExplanation } from "./analysis.llm.explainer";
 
 /**
  * OpenAI-compatible LLM client (design D7/D8).

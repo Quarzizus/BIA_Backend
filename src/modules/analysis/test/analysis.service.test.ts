@@ -1,11 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { createAnalysisService, type AnalysisService } from "./analysis.service";
-import type { LlmClient } from "./llm.client";
+import { createAnalysisService, type AnalysisService } from "../analysis.service";
+import type { LlmClient } from "../analysis.llm.client";
 import {
   createTestPrisma,
   provisionTestDb,
   seedTestDb,
-} from "../../testing/analysisTestDb";
+} from "../../../testing/analysisTestDb";
 
 const prisma = createTestPrisma();
 const FIXTURE_METERS = ["M-PZ1", "M-PZ2", "M-PZ3", "M-PZ4"];

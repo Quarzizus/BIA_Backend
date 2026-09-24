@@ -7,7 +7,7 @@ import {
   populationStd,
   variationPct,
   type BaselineReading,
-} from "./baseline";
+} from "../meter.baseline";
 
 function reading(
   consumptionKwh: number,

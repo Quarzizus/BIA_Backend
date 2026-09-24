@@ -1,8 +1,8 @@
 import { Router } from "express";
 import type { PrismaClient } from "../../generated/prisma/client";
 import { ApiError, formatZodIssues } from "../../shared/errors";
-import { anomalyIdParam, listQuery, statusUpdate } from "./model";
-import { createAnomalyService } from "./service";
+import { anomalyIdParam, listQuery, statusUpdate } from "./anomaly.model";
+import { createAnomalyService } from "./anomaly.service";
 
 export function createAnomaliesRouter(prisma: PrismaClient): Router {
   const router = Router();

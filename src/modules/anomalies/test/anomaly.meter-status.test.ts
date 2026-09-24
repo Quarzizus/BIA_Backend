@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { deriveMeterStatus } from "./meter-status";
+import { deriveMeterStatus } from "../anomaly.meter-status";
 
 describe("deriveMeterStatus (design D4)", () => {
   test("maps a single HIGH severity to CRITICAL", () => {

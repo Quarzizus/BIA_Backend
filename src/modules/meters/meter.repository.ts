@@ -1,6 +1,6 @@
 import type { PrismaClient } from "../../generated/prisma/client";
 import type { Meter, Reading } from "../../generated/prisma/client";
-import { BASELINE_WINDOW_DAYS } from "./baseline";
+import { BASELINE_WINDOW_DAYS } from "./meter.baseline";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

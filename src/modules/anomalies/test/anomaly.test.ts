@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { getPrisma } from "../../config/database";
-import { startTestServer, type TestServer } from "../../testing/testServer";
-import { createAnomaliesRouter } from "./routes";
+import { getPrisma } from "../../../config/database";
+import { startTestServer, type TestServer } from "../../../testing/testServer";
+import { createAnomaliesRouter } from "../anomaly.routes";
 
 const prisma = getPrisma();
 const FIXTURE_METERS = ["M-ZZ1", "M-ZZ2", "M-ZZ3", "M-ZZ4"];

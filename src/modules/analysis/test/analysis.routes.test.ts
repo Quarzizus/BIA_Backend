@@ -1,12 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { startTestServer, type TestServer } from "../../testing/testServer";
-import { createAnalysisRouter } from "./routes";
-import type { LlmClient } from "./llm.client";
+import { startTestServer, type TestServer } from "../../../testing/testServer";
+import { createAnalysisRouter } from "../analysis.routes";
+import type { LlmClient } from "../analysis.llm.client";
 import {
   createTestPrisma,
   provisionTestDb,
   seedTestDb,
-} from "../../testing/analysisTestDb";
+} from "../../../testing/analysisTestDb";
 
 const prisma = createTestPrisma();
 

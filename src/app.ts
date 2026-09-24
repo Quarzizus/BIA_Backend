@@ -2,11 +2,11 @@ import express from "express";
 import type { Express } from "express";
 import type { PrismaClient } from "./generated/prisma/client";
 import { errorMiddleware, notFoundHandler } from "./shared/errors";
-import { createMetersRouter } from "./modules/meters/routes";
-import { createReadingsRouter } from "./modules/readings/routes";
-import { createAnomaliesRouter } from "./modules/anomalies/routes";
-import { createDashboardRouter } from "./modules/dashboard/routes";
-import { createAnalysisRouter, type AnalysisRouterDeps } from "./modules/analysis/routes";
+import { createMetersRouter } from "./modules/meters/meter.routes";
+import { createReadingsRouter } from "./modules/readings/reading.routes";
+import { createAnomaliesRouter } from "./modules/anomalies/anomaly.routes";
+import { createDashboardRouter } from "./modules/dashboard/dashboard.routes";
+import { createAnalysisRouter, type AnalysisRouterDeps } from "./modules/analysis/analysis.routes";
 
 export interface AppOptions {
   analysis?: AnalysisRouterDeps;

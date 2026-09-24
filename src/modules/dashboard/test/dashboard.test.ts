@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { getPrisma } from "../../config/database";
-import { startTestServer, type TestServer } from "../../testing/testServer";
-import { createDashboardRouter } from "./routes";
+import { getPrisma } from "../../../config/database";
+import { startTestServer, type TestServer } from "../../../testing/testServer";
+import { createDashboardRouter } from "../dashboard.routes";
 
 const prisma = getPrisma();
 const FIXTURE_METERS = ["M-ZZ5", "M-ZZ6"];
