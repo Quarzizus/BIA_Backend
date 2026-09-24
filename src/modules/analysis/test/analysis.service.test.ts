@@ -185,7 +185,7 @@ describe("runAnalysis pipeline", () => {
     }
   });
 
-  test("marks the run FAILED and clears the lock when the LLM fails (no degrade)", async () => {
+  test("completes the run with rule-based fallback explanations when the LLM fails", async () => {
     const failing = createAnalysisService(
       prisma,
       createFakeLlm({
@@ -202,13 +202,61 @@ describe("runAnalysis pipeline", () => {
     await failing.runAnalysis(run.id, { meterCodes: FIXTURE_METERS });
 
     const after = await prisma.analysisRun.findUnique({ where: { id: run.id } });
-    expect(after!.status).toBe("FAILED");
+    // El run COMPLETA con llm_used=false: el fallback por reglas preserva el resultado.
+    expect(after!.status).toBe("COMPLETED");
     expect(after!.llmUsed).toBe(false);
     expect(after!.lockToken).toBeNull();
-    expect(after!.summary).toContain("provider 500");
+    expect(after!.summary).toContain("Detected 4");
 
-    const anomalies = await prisma.anomaly.count({ where: { analysisRunId: run.id } });
-    expect(anomalies).toBe(0);
+    const anomalies = await prisma.anomaly.findMany({
+      where: { analysisRunId: run.id },
+      include: { meter: true },
+    });
+    expect(anomalies).toHaveLength(4);
+    // Cada anomalía conserva su clasificación determinista con explicación por reglas.
+    for (const anomaly of anomalies) {
+      expect(anomaly.reason).toContain("por reglas");
+      expect(anomaly.reason).toContain(anomaly.type);
+      expect(anomaly.recommendedAction!.length).toBeGreaterThan(0);
+    }
+  });
+
+  test("an LLM failure on ONE meter does not erase the other meters' findings", async () => {
+    const partial = createAnalysisService(
+      prisma,
+      createFakeLlm({
+        async explain(input) {
+          if (input.meterId === "M-PZ1") throw new Error("timeout");
+          return {
+            reason: "Consumo anómalo detectado por el análisis estadístico.",
+            recommended_action: "Revisar la instalación del medidor.",
+          };
+        },
+      }),
+      { AI_API_KEY: "test-key", AI_BASE_URL: "https://fake/v1", AI_MODEL: "test" },
+    );
+    const run = await prisma.analysisRun.create({
+      data: { status: "RUNNING", lockToken: "single" },
+    });
+    createdRunIds.push(run.id);
+    await partial.runAnalysis(run.id, { meterCodes: FIXTURE_METERS });
+
+    const after = await prisma.analysisRun.findUnique({ where: { id: run.id } });
+    expect(after!.status).toBe("COMPLETED");
+    // El resto de medidores sí usó el LLM, así que el run reporta llm_used=true.
+    expect(after!.llmUsed).toBe(true);
+
+    const anomalies = await prisma.anomaly.findMany({
+      where: { analysisRunId: run.id },
+      include: { meter: true },
+    });
+    expect(anomalies).toHaveLength(4);
+    const byMeter = new Map(anomalies.map((a) => [a.meter!.meterId, a]));
+    // El medidor con timeout usa el fallback por reglas; los demás conservan la explicación del LLM.
+    expect(byMeter.get("M-PZ1")!.reason).toContain("por reglas");
+    for (const code of ["M-PZ2", "M-PZ3", "M-PZ4"]) {
+      expect(byMeter.get(code)!.reason).toContain("anómalo");
+    }
   });
 
   test("getStatus returns status, summary and anomaly count", async () => {

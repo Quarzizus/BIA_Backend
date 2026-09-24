@@ -104,3 +104,27 @@ export const EVENT_MAPPING: Record<EventType, { type: AnomalyType; severity: Sev
   DATA_QUALITY: { type: "DATA_QUALITY", severity: "HIGH" },
   UNKNOWN: { type: "REAL_ANOMALY", severity: "HIGH" },
 };
+
+/**
+ * Fallback por reglas cuando el proveedor de IA no está disponible: explicación
+ * en español que cita la evidencia concreta de la detección. Null-safe (maxZ o
+ * variación n/d). El texto "por reglas" marca el origen del fallback.
+ */
+export function FALLBACK_REASON(
+  type: AnomalyType,
+  detectionType: string,
+  maxZ: number | null,
+  variationPct: number | null,
+): string {
+  const z = maxZ !== null ? String(maxZ) : "n/d";
+  const variation = variationPct !== null ? String(variationPct) : "n/d";
+  return `Anomalía ${type} (${detectionType}, max |z| ${z}, variación ${variation}%). El proveedor de IA no estuvo disponible; explicación generada por reglas.`;
+}
+
+/** Acción recomendada por reglas, una por tipo de anomalía (fallback del LLM). */
+export const FALLBACK_ACTION: Record<AnomalyType, string> = {
+  REAL_ANOMALY: "Inspeccionar el medidor y verificar la causa del consumo anómalo.",
+  EXPLAINABLE_ANOMALY: "Verificar que el cambio operativo explique la magnitud observada.",
+  FALSE_POSITIVE: "La señal coincide con un evento programado; no requiere acción.",
+  DATA_QUALITY: "Verificar la integridad de la medición (sensores y registro).",
+};

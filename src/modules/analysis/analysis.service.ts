@@ -5,7 +5,7 @@ import { logger } from "../../shared/logger";
 import { computeBaseline } from "./stages/analysis.baseline.calculator";
 import { classifyAnomaly, coveringEvent, type MeterEvent } from "./stages/analysis.classifier";
 import { consolidateDetections, detectMeter } from "./stages/analysis.detector";
-import { SEVERITY_CONFIDENCE } from "./analysis.domain";
+import { FALLBACK_ACTION, FALLBACK_REASON, SEVERITY_CONFIDENCE } from "./analysis.domain";
 import type { LlmClient } from "./llm/analysis.llm.client";
 import {
   createAnalysisRepository,
@@ -19,8 +19,9 @@ import {
  *    (P2002 → 409 ANALYSIS_IN_PROGRESS) y lanza el runner desacoplado.
  *  - runAnalysis(): ejecuta el pipeline de 3 etapas sobre cada medidor y
  *    persiste UNA anomalía consolidada por medidor afectado + el status de
- *    medidor recalculado en una sola transacción. Falla del LLM → run FAILED,
- *    llm_used=false (sin degradación).
+ *    medidor recalculado en una sola transacción. Fallback por reglas POR
+ *    MEDIDOR si el LLM falla (explicación en español, llm_used=false para esa
+ *    llamada): un timeout en un medidor no borra los hallazgos del resto.
  *  - getStatus(): contrato de polling para GET /ai/analysis/:id.
  *
  * Solo orquestación: toda la persistencia vive en analysis.repository, los
@@ -67,18 +68,18 @@ export function createAnalysisService(
     meter: Meter,
     meterReadings: Reading[],
     events: MeterEvent[],
-  ): Promise<AnalysisFinding | null> {
-    if (meterReadings.length === 0) return null;
+  ): Promise<{ finding: AnalysisFinding | null; llmUsed: boolean }> {
+    if (meterReadings.length === 0) return { finding: null, llmUsed: false };
 
     const baseline = computeBaseline(meterReadings);
-    if (baseline.consumption_kwh.mean === null) return null;
+    if (baseline.consumption_kwh.mean === null) return { finding: null, llmUsed: false };
 
     const consolidated = consolidateDetections(
       detectMeter(meterReadings, baseline),
       meterReadings,
       baseline,
     );
-    if (!consolidated) return null;
+    if (!consolidated) return { finding: null, llmUsed: false };
 
     const classification = classifyAnomaly({
       detectionType: consolidated.detectionType,
@@ -92,33 +93,66 @@ export function createAnalysisService(
     let severity = classification.severity;
     let reason: string;
     let recommendedAction: string;
+    let llmUsed = false;
 
     if (classification.needsLlm) {
-      // Caso límite: el LLM clasifica la situación ambigua.
-      const llmResult = await llm.classify({
-        meterId: meter.meterId,
-        detectionType: consolidated.detectionType,
-        signals: consolidated.signals,
-        rangeStart: consolidated.rangeStart.toISOString(),
-        rangeEnd: consolidated.rangeEnd.toISOString(),
-      });
-      type = llmResult.type;
-      severity = llmResult.severity;
-      reason = llmResult.reason;
-      recommendedAction = llmResult.recommended_action;
+      // Caso límite: el LLM clasifica la situación ambigua. Si el proveedor
+      // falla, se conserva la clasificación determinista por reglas.
+      try {
+        const llmResult = await llm.classify({
+          meterId: meter.meterId,
+          detectionType: consolidated.detectionType,
+          signals: consolidated.signals,
+          rangeStart: consolidated.rangeStart.toISOString(),
+          rangeEnd: consolidated.rangeEnd.toISOString(),
+        });
+        type = llmResult.type;
+        severity = llmResult.severity;
+        reason = llmResult.reason;
+        recommendedAction = llmResult.recommended_action;
+        llmUsed = true;
+      } catch (err) {
+        logger.warn("LLM no disponible para clasificar; se usa la clasificación por reglas", {
+          meterId: meter.meterId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        reason = FALLBACK_REASON(
+          type,
+          consolidated.detectionType,
+          consolidated.maxZ,
+          consolidated.variationPct,
+        );
+        recommendedAction = FALLBACK_ACTION[type];
+      }
     } else {
-      // Anomalía confirmada: el LLM genera la explicación en español.
-      const explanation = await llm.explain({
-        meterId: meter.meterId,
-        type,
-        severity,
-        detectionType: consolidated.detectionType,
-        signals: consolidated.signals,
-        rangeStart: consolidated.rangeStart.toISOString(),
-        rangeEnd: consolidated.rangeEnd.toISOString(),
-      });
-      reason = explanation.reason;
-      recommendedAction = explanation.recommended_action;
+      // Anomalía confirmada: el LLM genera la explicación en español. Si el
+      // proveedor falla, se genera una explicación por reglas con la evidencia.
+      try {
+        const explanation = await llm.explain({
+          meterId: meter.meterId,
+          type,
+          severity,
+          detectionType: consolidated.detectionType,
+          signals: consolidated.signals,
+          rangeStart: consolidated.rangeStart.toISOString(),
+          rangeEnd: consolidated.rangeEnd.toISOString(),
+        });
+        reason = explanation.reason;
+        recommendedAction = explanation.recommended_action;
+        llmUsed = true;
+      } catch (err) {
+        logger.warn("LLM no disponible para explicar; se genera una explicación por reglas", {
+          meterId: meter.meterId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        reason = FALLBACK_REASON(
+          type,
+          consolidated.detectionType,
+          consolidated.maxZ,
+          consolidated.variationPct,
+        );
+        recommendedAction = FALLBACK_ACTION[type];
+      }
     }
 
     // Evento relacionado: se reutiliza la regla de cobertura del clasificador
@@ -135,17 +169,20 @@ export function createAnalysisService(
       : null;
 
     return {
-      meterId: meter.id,
-      detectionType: consolidated.detectionType,
-      rangeStart: consolidated.rangeStart,
-      rangeEnd: consolidated.rangeEnd,
-      type,
-      severity,
-      confidence: SEVERITY_CONFIDENCE[severity],
-      signals: consolidated.signals,
-      reason,
-      recommendedAction,
-      relatedEventId: relatedEvent?.id ?? null,
+      finding: {
+        meterId: meter.id,
+        detectionType: consolidated.detectionType,
+        rangeStart: consolidated.rangeStart,
+        rangeEnd: consolidated.rangeEnd,
+        type,
+        severity,
+        confidence: SEVERITY_CONFIDENCE[severity],
+        signals: consolidated.signals,
+        reason,
+        recommendedAction,
+        relatedEventId: relatedEvent?.id ?? null,
+      },
+      llmUsed,
     };
   }
 
@@ -156,17 +193,28 @@ export function createAnalysisService(
       : meters;
 
     const findings: AnalysisFinding[] = [];
+    // llm_used del run: true si CUALQUIER llamada al LLM tuvo éxito.
+    let llmUsed = false;
     for (const meter of selectedMeters) {
-      const finding = await processMeter(
-        meter,
-        readingsByMeter.get(meter.id) ?? [],
-        eventsByMeter.get(meter.id) ?? [],
-      );
-      if (finding) findings.push(finding);
+      try {
+        const { finding, llmUsed: meterLlmUsed } = await processMeter(
+          meter,
+          readingsByMeter.get(meter.id) ?? [],
+          eventsByMeter.get(meter.id) ?? [],
+        );
+        llmUsed = llmUsed || meterLlmUsed;
+        if (finding) findings.push(finding);
+      } catch (err) {
+        // Defensivo: un fallo inesperado en un medidor no debe matar el run.
+        logger.warn("medidor omitido por error inesperado durante el análisis", {
+          meterId: meter.meterId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
 
     const summary = `Detected ${findings.length} anomaly(ies) across ${new Set(findings.map((finding) => finding.meterId)).size} meter(s)`;
-    await repository.persistFindings(runId, findings, summary);
+    await repository.persistFindings(runId, findings, summary, llmUsed);
   }
 
   return {

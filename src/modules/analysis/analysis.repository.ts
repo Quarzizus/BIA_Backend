@@ -42,7 +42,12 @@ export interface AnalysisRepository {
     eventType: MeterEvent["eventType"],
   ): Promise<{ id: string } | null>;
   /** Persiste hallazgos + status de medidor recalculado + finalización del run, atómicamente. */
-  persistFindings(runId: string, findings: AnalysisFinding[], summary: string): Promise<void>;
+  persistFindings(
+    runId: string,
+    findings: AnalysisFinding[],
+    summary: string,
+    llmUsed: boolean,
+  ): Promise<void>;
   failRun(runId: string, message: string): Promise<void>;
   countAnomalies(runId: string): Promise<number>;
 }
@@ -88,7 +93,7 @@ export function createAnalysisRepository(prisma: PrismaClient): AnalysisReposito
       });
     },
 
-    async persistFindings(runId, findings, summary) {
+    async persistFindings(runId, findings, summary, llmUsed) {
       await prisma.$transaction(async (tx) => {
         for (const finding of findings) {
           await tx.anomaly.create({
@@ -122,7 +127,7 @@ export function createAnalysisRepository(prisma: PrismaClient): AnalysisReposito
             summary,
             completedAt: new Date(),
             lockToken: null,
-            llmUsed: true,
+            llmUsed,
           },
         });
       });
