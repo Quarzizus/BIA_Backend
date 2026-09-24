@@ -6,7 +6,7 @@ import { createMetersRouter } from "./modules/meters/meter.routes";
 import { createReadingsRouter } from "./modules/readings/reading.routes";
 import { createAnomaliesRouter } from "./modules/anomalies/anomaly.routes";
 import { createDashboardRouter } from "./modules/dashboard/dashboard.routes";
-import { createAnalysisRouter, type AnalysisRouterDeps } from "./modules/analysis/analysis.routes";
+import { createAnalysisRouter, type AnalysisRouterDeps } from "./modules/analysis";
 
 export interface AppOptions {
   analysis?: AnalysisRouterDeps;

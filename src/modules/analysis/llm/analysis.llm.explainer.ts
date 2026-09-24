@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { SYSTEM_PROMPT } from "../../shared/domain/llm";
-import type { ExplainInput, ExplainOutput } from "../../shared/domain/llm";
+import { SYSTEM_PROMPT } from "../../../shared/domain/llm";
+import type { ExplainInput, ExplainOutput } from "../../../shared/domain/llm";
 
 /**
  * LLM explanation builder (design D7/D8): builds the Spanish prompt for a

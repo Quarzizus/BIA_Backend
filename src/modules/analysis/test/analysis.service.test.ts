@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createAnalysisService, type AnalysisService } from "../analysis.service";
-import type { LlmClient } from "../analysis.llm.client";
+import type { LlmClient } from "../llm/analysis.llm.client";
 import {
   createTestPrisma,
   provisionTestDb,

@@ -6,8 +6,8 @@ import {
   populationStd,
   type BaselineReading,
   type BaselineStats,
-} from "../../shared/domain/baseline";
-import type { MeterBaseline } from "./analysis.domain";
+} from "../../../shared/domain/baseline";
+import type { MeterBaseline } from "../analysis.domain";
 
 /**
  * Pipeline-facing baseline calculator (Stage 1). Reuses the pure statistical
@@ -16,7 +16,7 @@ import type { MeterBaseline } from "./analysis.domain";
  */
 
 export type { BaselineStats };
-export type { BaselineSignal, MeterBaseline, SignalStats } from "./analysis.domain";
+export type { BaselineSignal, MeterBaseline, SignalStats } from "../analysis.domain";
 
 /** First-7-days readings for a meter (shared rule with the meters read APIs). */
 export function baselineReadingsWindow<T extends { timestamp: Date }>(

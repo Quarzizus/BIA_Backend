@@ -3,7 +3,7 @@ import {
   classifyAnomaly,
   nearMissWindowMs,
   type ClassifyInput,
-} from "../analysis.classifier";
+} from "../stages/analysis.classifier";
 
 const input = (overrides: Partial<ClassifyInput> = {}): ClassifyInput => ({
   detectionType: "SPIKE",

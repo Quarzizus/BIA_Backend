@@ -1,12 +1,12 @@
 import { z } from "zod";
-import { SYSTEM_PROMPT } from "../../shared/domain/llm";
+import { SYSTEM_PROMPT } from "../../../shared/domain/llm";
 import type {
   ClassifyInput,
   ClassifyOutput,
   ExplainInput,
   ExplainOutput,
   LlmEnv,
-} from "../../shared/domain/llm";
+} from "../../../shared/domain/llm";
 import { buildExplainPrompt, parseExplanation } from "./analysis.llm.explainer";
 
 /**
@@ -19,7 +19,7 @@ import { buildExplainPrompt, parseExplanation } from "./analysis.llm.explainer";
  * The env shape, I/O contracts and SYSTEM_PROMPT are shared via shared/domain/llm.
  */
 
-export type { ClassifyInput, ClassifyOutput, ExplainInput, ExplainOutput, LlmEnv } from "../../shared/domain/llm";
+export type { ClassifyInput, ClassifyOutput, ExplainInput, ExplainOutput, LlmEnv } from "../../../shared/domain/llm";
 
 const classifySchema = z.object({
   type: z.enum(["REAL_ANOMALY", "EXPLAINABLE_ANOMALY", "FALSE_POSITIVE", "DATA_QUALITY"]),

@@ -2,11 +2,11 @@ import type { Meter, PrismaClient, Reading } from "../../generated/prisma/client
 import { ApiError } from "../../shared/errors";
 import type { LlmEnv } from "../../shared/domain/llm";
 import { logger } from "../../shared/logger";
-import { computeBaseline } from "./analysis.baseline.calculator";
-import { classifyAnomaly, coveringEvent, type MeterEvent } from "./analysis.classifier";
-import { consolidateDetections, detectMeter } from "./analysis.detector";
+import { computeBaseline } from "./stages/analysis.baseline.calculator";
+import { classifyAnomaly, coveringEvent, type MeterEvent } from "./stages/analysis.classifier";
+import { consolidateDetections, detectMeter } from "./stages/analysis.detector";
 import { SEVERITY_CONFIDENCE } from "./analysis.domain";
-import type { LlmClient } from "./analysis.llm.client";
+import type { LlmClient } from "./llm/analysis.llm.client";
 import {
   createAnalysisRepository,
   type AnalysisFinding,

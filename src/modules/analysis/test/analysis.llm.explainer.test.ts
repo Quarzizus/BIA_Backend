@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildExplainPrompt, parseExplanation } from "../analysis.llm.explainer";
+import { buildExplainPrompt, parseExplanation } from "../llm/analysis.llm.explainer";
 
 const anomaly = {
   meterId: "M-109",

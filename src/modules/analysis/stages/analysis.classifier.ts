@@ -6,7 +6,7 @@ import {
   type ClassifyInput,
   type Classification,
   type MeterEvent,
-} from "./analysis.domain";
+} from "../analysis.domain";
 
 /**
  * Stage 3 — Classifier.
@@ -19,8 +19,8 @@ import {
  * Types and constants live in analysis.domain; this file keeps the rules.
  */
 
-export type { ClassifyInput, Classification, MeterEvent } from "./analysis.domain";
-export { LLM_Z_MIN, LLM_Z_MAX, nearMissWindowMs } from "./analysis.domain";
+export type { ClassifyInput, Classification, MeterEvent } from "../analysis.domain";
+export { LLM_Z_MIN, LLM_Z_MAX, nearMissWindowMs } from "../analysis.domain";
 
 /** Finds the event whose timestamp lies inside the affected range (inclusive). */
 export function coveringEvent(input: ClassifyInput): MeterEvent | null {

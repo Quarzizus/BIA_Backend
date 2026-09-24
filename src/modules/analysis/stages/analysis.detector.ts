@@ -1,5 +1,5 @@
-import { mean, populationStd } from "../../shared/domain/baseline";
-import { DAY_MS, HOUR_MS } from "../../shared/domain/time";
+import { mean, populationStd } from "../../../shared/domain/baseline";
+import { DAY_MS, HOUR_MS } from "../../../shared/domain/time";
 import {
   DQ_CONSUMPTION_TOLERANCE,
   DQ_STD_RATIO,
@@ -10,7 +10,7 @@ import {
   type ConsolidatedDetection,
   type MeterBaseline,
   type ReadingPoint,
-} from "./analysis.domain";
+} from "../analysis.domain";
 
 /**
  * Stage 2 — Detector.
@@ -27,7 +27,7 @@ import {
  * Types and constants live in analysis.domain; this file keeps the signal math.
  */
 
-export type { ConsolidatedDetection, Detection, DetectionType, ReadingPoint } from "./analysis.domain";
+export type { ConsolidatedDetection, Detection, DetectionType, ReadingPoint } from "../analysis.domain";
 
 type Signal = keyof MeterBaseline;
 

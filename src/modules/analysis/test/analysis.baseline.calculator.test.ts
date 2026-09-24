@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { computeBaseline, type BaselineSignal } from "../analysis.baseline.calculator";
+import { computeBaseline, type BaselineSignal } from "../stages/analysis.baseline.calculator";
 
 /** Builds hourly readings for a synthetic meter over `days` starting 2026-09-01. */
 function makeReadings(
