@@ -5,7 +5,7 @@ import type { MeterStatus } from "../../generated/prisma/enums";
  * anomaly: HIGH -> CRITICAL, MEDIUM -> ALERT, otherwise NORMAL.
  *
  * Single source of truth for the derivation. Reused by analysis run
- * completion (analysis.service) and anomaly PATCH transitions
+ * completion (analysis.repository) and anomaly PATCH transitions
  * (anomalies/service) so the rule lives in exactly one place.
  */
 export function deriveMeterStatus(activeSeverities: readonly string[]): MeterStatus {

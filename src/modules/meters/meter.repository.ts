@@ -1,17 +1,15 @@
 import type { PrismaClient } from "../../generated/prisma/client";
 import type { Meter, Reading } from "../../generated/prisma/client";
-import { BASELINE_WINDOW_DAYS } from "./meter.baseline";
+import { baselineWindow } from "../../shared/domain/baseline";
+import type { MeterRepository } from "./meter.domain";
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-export interface MeterRepository {
-  listMeters(): Promise<Meter[]>;
-  findMeterByCode(meterId: string): Promise<Meter | null>;
-  latestReadings(meterIds: string[]): Promise<Reading[]>;
-  baselineReadings(meterIds: string[]): Promise<Reading[]>;
-  history(meterId: string): Promise<Reading[]>;
-}
-
+/**
+ * Meters persistence — ALL Prisma access for the meters module.
+ *
+ * Note on naming: the methods take meter CODES (the `meterId` column), not the
+ * internal `Meter.id` FK. Readings carry `meterId` as the FK to `Meter.id`,
+ * so relation filters translate codes -> FK (`meter: { meterId: { in } }`).
+ */
 export function createMeterRepository(prisma: PrismaClient): MeterRepository {
   return {
     async listMeters(): Promise<Meter[]> {
@@ -22,50 +20,41 @@ export function createMeterRepository(prisma: PrismaClient): MeterRepository {
       return prisma.meter.findUnique({ where: { meterId } });
     },
 
-    async latestReadings(meterIds: string[]): Promise<Reading[]> {
-      if (meterIds.length === 0) return [];
+    async latestReadings(meterCodes: string[]): Promise<Reading[]> {
+      if (meterCodes.length === 0) return [];
       // One row per meter: the first row in descending timestamp order is the latest.
       return prisma.reading.findMany({
-        where: { meter: { meterId: { in: meterIds } } },
+        where: { meter: { meterId: { in: meterCodes } } },
         orderBy: { timestamp: "desc" },
         distinct: ["meterId"],
       });
     },
 
-    async baselineReadings(meterIds: string[]): Promise<Reading[]> {
-      if (meterIds.length === 0) return [];
+    async baselineReadings(meterCodes: string[]): Promise<Reading[]> {
+      if (meterCodes.length === 0) return [];
 
-      // First-7-days window per meter: everything strictly before
-      // (min(timestamp) + 7 days). All seeded meters share a 09-01 start, but
-      // the cutoff is computed per meter so the rule holds for any dataset.
-      const minByMeter = await prisma.reading.groupBy({
-        by: ["meterId"],
-        where: { meter: { meterId: { in: meterIds } } },
-        _min: { timestamp: true },
-      });
-      const cutoffByMeter = new Map<string, number>();
-      for (const row of minByMeter) {
-        if (row._min.timestamp) {
-          cutoffByMeter.set(
-            row.meterId,
-            row._min.timestamp.getTime() + BASELINE_WINDOW_DAYS * DAY_MS,
-          );
-        }
-      }
-      if (cutoffByMeter.size === 0) return [];
-
-      const maxCutoff = Math.max(...cutoffByMeter.values());
+      // First-7-days window PER METER via the shared pure rule
+      // (`baselineWindow`: everything strictly before first + 7 days). All
+      // seeded meters share a 09-01 start, but the cutoff is computed per
+      // meter so the rule holds for any dataset. Group by the Reading FK
+      // (meterId -> Meter.id); each bucket stays sorted ascending.
       const readings = await prisma.reading.findMany({
-        where: {
-          meter: { meterId: { in: meterIds } },
-          timestamp: { lt: new Date(maxCutoff) },
-        },
+        where: { meter: { meterId: { in: meterCodes } } },
         orderBy: { timestamp: "asc" },
       });
-      return readings.filter((reading) => {
-        const cutoff = cutoffByMeter.get(reading.meterId);
-        return cutoff !== undefined && reading.timestamp.getTime() < cutoff;
-      });
+      const byMeter = new Map<string, Reading[]>();
+      for (const reading of readings) {
+        const bucket = byMeter.get(reading.meterId) ?? [];
+        bucket.push(reading);
+        byMeter.set(reading.meterId, bucket);
+      }
+      const windows: Reading[] = [];
+      for (const bucket of byMeter.values()) {
+        const windowed = baselineWindow(bucket);
+        // baselineWindow only filters; the elements are the same Reading rows.
+        windows.push(...(windowed as Reading[]));
+      }
+      return windows;
     },
 
     async history(meterId: string): Promise<Reading[]> {

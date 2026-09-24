@@ -1,4 +1,12 @@
-import type { AnomalyType, EventType, Severity } from "../../generated/prisma/enums";
+import {
+  EVENT_MAPPING,
+  LLM_Z_MAX,
+  LLM_Z_MIN,
+  nearMissWindowMs,
+  type ClassifyInput,
+  type Classification,
+  type MeterEvent,
+} from "./analysis.domain";
 
 /**
  * Stage 3 — Classifier.
@@ -7,38 +15,12 @@ import type { AnomalyType, EventType, Severity } from "../../generated/prisma/en
  * severity using event coverage: `event_timestamp ∈ [rangeStart, rangeEnd]`.
  * DATA_QUALITY signal has priority. Borderline cases (2.5 <= maxZ < 3 or a
  * near-miss event within ±6h of the range) are routed to the LLM.
+ *
+ * Types and constants live in analysis.domain; this file keeps the rules.
  */
 
-export const nearMissWindowMs = 6 * 60 * 60 * 1000;
-export const LLM_Z_MIN = 2.5;
-export const LLM_Z_MAX = 3;
-
-export interface MeterEvent {
-  eventTimestamp: Date;
-  eventType: EventType;
-}
-
-export interface ClassifyInput {
-  detectionType: string;
-  rangeStart: Date;
-  rangeEnd: Date;
-  maxZ: number | null;
-  events: MeterEvent[];
-}
-
-export interface Classification {
-  type: AnomalyType;
-  severity: Severity;
-  needsLlm: boolean;
-  coveringEvent: EventType | null;
-}
-
-const EVENT_MAPPING: Record<EventType, { type: AnomalyType; severity: Severity }> = {
-  SCHEDULED_OUTAGE: { type: "FALSE_POSITIVE", severity: "LOW" },
-  OPERATIONAL_CHANGE: { type: "EXPLAINABLE_ANOMALY", severity: "MEDIUM" },
-  DATA_QUALITY: { type: "DATA_QUALITY", severity: "HIGH" },
-  UNKNOWN: { type: "REAL_ANOMALY", severity: "HIGH" },
-};
+export type { ClassifyInput, Classification, MeterEvent } from "./analysis.domain";
+export { LLM_Z_MIN, LLM_Z_MAX, nearMissWindowMs } from "./analysis.domain";
 
 /** Finds the event whose timestamp lies inside the affected range (inclusive). */
 export function coveringEvent(input: ClassifyInput): MeterEvent | null {

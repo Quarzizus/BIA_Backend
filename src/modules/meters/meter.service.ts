@@ -1,20 +1,9 @@
 import type { PrismaClient } from "../../generated/prisma/client";
-import type { Meter, Reading } from "../../generated/prisma/client";
 import { ApiError } from "../../shared/errors";
-import { computeBaselineStats, variationPct } from "./meter.baseline";
+import { toReadingDto } from "../../shared/domain/reading";
+import { computeBaselineStats, variationPct } from "../../shared/domain/baseline";
 import { createMeterRepository } from "./meter.repository";
-import type { MeterDetail, MeterSummary, ReadingDto } from "./meter.model";
-
-function toReadingDto(reading: Reading): ReadingDto {
-  return {
-    timestamp: reading.timestamp.toISOString(),
-    consumption_kwh: reading.consumptionKwh,
-    voltage_v: reading.voltageV,
-    current_a: reading.currentA,
-    power_factor: reading.powerFactor,
-    status: reading.status,
-  };
-}
+import type { MeterDetail, MeterService, MeterSummary } from "./meter.domain";
 
 function groupBy<T, K extends string>(items: T[], key: (item: T) => K): Map<K, T[]> {
   const map = new Map<K, T[]>();
@@ -25,11 +14,6 @@ function groupBy<T, K extends string>(items: T[], key: (item: T) => K): Map<K, T
     map.set(k, bucket);
   }
   return map;
-}
-
-export interface MeterService {
-  list(): Promise<MeterSummary[]>;
-  detail(meterId: string): Promise<MeterDetail>;
 }
 
 export function createMeterService(prisma: PrismaClient): MeterService {
@@ -51,7 +35,9 @@ export function createMeterService(prisma: PrismaClient): MeterService {
       }
 
       return meters.map((meter) => {
-        // Reading.meterId is the FK to Meter.id — key the maps by meter.id.
+        // Reading.meterId is the FK to the internal Meter.id (NOT the meter
+        // code); the repository methods take codes and translate via the
+        // relation. Key the maps by meter.id — the FK the readings carry.
         const current = latestByCode.get(meter.id);
         const baselineMean = baselineMeanByCode.get(meter.id) ?? null;
         return {

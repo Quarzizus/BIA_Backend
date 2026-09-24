@@ -1,20 +1,21 @@
 import type { PrismaClient } from "../../generated/prisma/client";
 import type { AnomalyStatus } from "../../generated/prisma/enums";
 import { ApiError } from "../../shared/errors";
-import {
-  anomalyInclude,
-  createAnomalyRepository,
-  type AnomalyFilters,
-  type AnomalyWithRelations,
-} from "./anomaly.repository";
+import { anomalyMeterCode } from "../../shared/domain/anomaly";
+import { createAnomalyRepository } from "./anomaly.repository";
 import { canTransition } from "./anomaly.transition";
-import { deriveMeterStatus } from "./anomaly.meter-status";
-import type { AnomalyDetail, AnomalyListItem } from "./anomaly.model";
+import type {
+  AnomalyDetail,
+  AnomalyFilters,
+  AnomalyListItem,
+  AnomalyRow,
+  AnomalyService,
+} from "./anomaly.domain";
 
-function toListItem(anomaly: AnomalyWithRelations): AnomalyListItem {
+function toListItem(anomaly: AnomalyRow): AnomalyListItem {
   return {
     id: anomaly.id,
-    meter_id: anomaly.meter?.meterId ?? anomaly.meterId,
+    meter_id: anomalyMeterCode(anomaly),
     type: anomaly.type,
     severity: anomaly.severity,
     confidence: anomaly.confidence,
@@ -22,12 +23,6 @@ function toListItem(anomaly: AnomalyWithRelations): AnomalyListItem {
     recommended_action: anomaly.recommendedAction,
     detected_at: anomaly.detectedAt.toISOString(),
   };
-}
-
-export interface AnomalyService {
-  list(filters: AnomalyFilters): Promise<AnomalyListItem[]>;
-  detail(id: string): Promise<AnomalyDetail>;
-  updateStatus(id: string, status: AnomalyStatus): Promise<AnomalyDetail>;
 }
 
 export function createAnomalyService(prisma: PrismaClient): AnomalyService {
@@ -77,24 +72,9 @@ export function createAnomalyService(prisma: PrismaClient): AnomalyService {
           `Cannot transition anomaly from ${anomaly.status} to ${status}`,
         );
       }
-      // D4: persist the transition and recompute Meter.status from the most
-      // severe ACTIVE (not RESOLVED) anomaly in the SAME transaction, so the
-      // dashboard/meters KPIs never go stale.
-      await prisma.$transaction(async (tx) => {
-        const updated = await tx.anomaly.update({
-          where: { id },
-          data: { status },
-          include: anomalyInclude,
-        });
-        const active = await tx.anomaly.findMany({
-          where: { meterId: updated.meterId, status: { not: "RESOLVED" } },
-          select: { severity: true },
-        });
-        await tx.meter.update({
-          where: { id: updated.meterId },
-          data: { status: deriveMeterStatus(active.map((a) => a.severity)) },
-        });
-      });
+      // D4: transition + Meter.status recompute happen atomically in the
+      // repository (updateStatusWithMeterRecompute) so KPIs never go stale.
+      await repository.updateStatusWithMeterRecompute(id, status);
       return detail(id);
     },
   };

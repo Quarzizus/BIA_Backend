@@ -1,4 +1,12 @@
 import { z } from "zod";
+import { SYSTEM_PROMPT } from "../../shared/domain/llm";
+import type {
+  ClassifyInput,
+  ClassifyOutput,
+  ExplainInput,
+  ExplainOutput,
+  LlmEnv,
+} from "../../shared/domain/llm";
 import { buildExplainPrompt, parseExplanation } from "./analysis.llm.explainer";
 
 /**
@@ -7,7 +15,11 @@ import { buildExplainPrompt, parseExplanation } from "./analysis.llm.explainer";
  * Fail-fast by contract: the client only constructs a request and throws on any
  * provider error (timeout, HTTP error, malformed JSON, schema mismatch). There
  * is NO silent rule-based fallback — the caller fails the analysis run.
+ *
+ * The env shape, I/O contracts and SYSTEM_PROMPT are shared via shared/domain/llm.
  */
+
+export type { ClassifyInput, ClassifyOutput, ExplainInput, ExplainOutput, LlmEnv } from "../../shared/domain/llm";
 
 const classifySchema = z.object({
   type: z.enum(["REAL_ANOMALY", "EXPLAINABLE_ANOMALY", "FALSE_POSITIVE", "DATA_QUALITY"]),
@@ -15,30 +27,6 @@ const classifySchema = z.object({
   reason: z.string().min(1),
   recommended_action: z.string().min(1),
 });
-
-export interface LlmEnv {
-  AI_API_KEY: string;
-  AI_BASE_URL: string;
-  AI_MODEL: string;
-}
-
-export interface ClassifyInput {
-  meterId: string;
-  detectionType: string;
-  signals: Record<string, unknown>;
-  rangeStart: string;
-  rangeEnd: string;
-}
-
-export interface ExplainInput {
-  meterId: string;
-  type: string;
-  severity: string;
-  detectionType: string;
-  signals: Record<string, unknown>;
-  rangeStart: string;
-  rangeEnd: string;
-}
 
 type JsonInput = Record<string, unknown>;
 
@@ -56,30 +44,12 @@ function buildMessages(
   ];
 }
 
-export interface ClassifyOutput {
-  type: "REAL_ANOMALY" | "EXPLAINABLE_ANOMALY" | "FALSE_POSITIVE" | "DATA_QUALITY";
-  severity: "HIGH" | "MEDIUM" | "LOW";
-  reason: string;
-  recommended_action: string;
-}
-
-export interface ExplainOutput {
-  reason: string;
-  recommended_action: string;
-}
-
 export interface LlmClient {
   classify(input: ClassifyInput): Promise<ClassifyOutput>;
   explain(input: ExplainInput): Promise<ExplainOutput>;
 }
 
 export const LLM_TIMEOUT_MS = 10_000;
-
-const SYSTEM_PROMPT = [
-  "Eres un analista experto en calidad de energía eléctrica industrial.",
-  "Responde ÚNICAMENTE con JSON válido, sin texto adicional.",
-  "Escribe la explicación (reason) y la acción recomendada (recommended_action) en español, concisas y técnicas.",
-].join(" ");
 
 async function completeJson(
   env: LlmEnv,

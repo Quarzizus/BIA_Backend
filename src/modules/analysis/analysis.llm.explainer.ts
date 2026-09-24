@@ -1,40 +1,25 @@
 import { z } from "zod";
+import { SYSTEM_PROMPT } from "../../shared/domain/llm";
+import type { ExplainInput, ExplainOutput } from "../../shared/domain/llm";
 
 /**
  * LLM explanation builder (design D7/D8): builds the Spanish prompt for a
  * confirmed anomaly and validates the model's JSON reply. Pure functions,
  * testable without any network — the HTTP transport lives in llm.client.ts.
+ *
+ * The system prompt and I/O contracts are shared via shared/domain/llm.
  */
 
-export interface ExplainAnomaly {
-  meterId: string;
-  type: string;
-  severity: string;
-  detectionType: string;
-  signals: Record<string, unknown>;
-  rangeStart: string;
-  rangeEnd: string;
-}
-
-export interface Explanation {
-  reason: string;
-  recommended_action: string;
-}
+export type { ExplainInput, ExplainOutput };
 
 const explanationSchema = z.object({
   reason: z.string().min(1),
   recommended_action: z.string().min(1),
 });
 
-const SYSTEM_PROMPT = [
-  "Eres un analista experto en calidad de energía eléctrica industrial.",
-  "Responde ÚNICAMENTE con JSON válido, sin texto adicional.",
-  "Escribe la explicación (reason) y la acción recomendada (recommended_action) en español, concisas y técnicas.",
-].join(" ");
-
 /** Builds the chat messages for explaining a confirmed anomaly. */
 export function buildExplainPrompt(
-  anomaly: ExplainAnomaly,
+  anomaly: ExplainInput,
 ): { role: string; content: string }[] {
   return [
     { role: "system", content: SYSTEM_PROMPT },
@@ -50,7 +35,7 @@ export function buildExplainPrompt(
 }
 
 /** Validates the LLM's JSON reply and returns the explanation contract. */
-export function parseExplanation(content: string): Explanation {
+export function parseExplanation(content: string): ExplainOutput {
   let raw: unknown;
   try {
     raw = JSON.parse(content);

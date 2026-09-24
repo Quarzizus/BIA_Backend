@@ -1,4 +1,16 @@
-import type { MeterBaseline } from "./analysis.baseline.calculator";
+import { mean, populationStd } from "../../shared/domain/baseline";
+import { DAY_MS, HOUR_MS } from "../../shared/domain/time";
+import {
+  DQ_CONSUMPTION_TOLERANCE,
+  DQ_STD_RATIO,
+  PERSISTENT_DEVIATION,
+  SUSTAINED_HOURS,
+  Z_THRESHOLD,
+  type Detection,
+  type ConsolidatedDetection,
+  type MeterBaseline,
+  type ReadingPoint,
+} from "./analysis.domain";
 
 /**
  * Stage 2 — Detector.
@@ -11,44 +23,24 @@ import type { MeterBaseline } from "./analysis.baseline.calculator";
  *    requirement excludes transient dips like M-106's 12h scheduled outage.
  *  - DATA_QUALITY: day blocks where consumption stays within 5% of baseline but
  *    voltage or power-factor std exceeds 5x the baseline std (electrical incoherence).
+ *
+ * Types and constants live in analysis.domain; this file keeps the signal math.
  */
 
-export const Z_THRESHOLD = 3;
-export const PERSISTENT_DEVIATION = 0.2;
-export const DQ_CONSUMPTION_TOLERANCE = 0.05;
-export const DQ_STD_RATIO = 5;
-export const SUSTAINED_HOURS = 12;
-export const HOUR_MS = 60 * 60 * 1000;
-export const DAY_MS = 24 * HOUR_MS;
+export type { ConsolidatedDetection, Detection, DetectionType, ReadingPoint } from "./analysis.domain";
 
-export type DetectionType = "SPIKE" | "PERSISTENT_CHANGE" | "DATA_QUALITY";
+type Signal = keyof MeterBaseline;
 
-export interface ReadingPoint {
-  timestamp: Date;
-  consumptionKwh: number;
-  voltageV: number;
-  currentA: number;
-  powerFactor: number;
-}
+/** Signal-name → value picker (single place instead of nested ternaries). */
+const SIGNAL_PICKERS: Record<Signal, (reading: ReadingPoint) => number> = {
+  consumption_kwh: (reading) => reading.consumptionKwh,
+  voltage_v: (reading) => reading.voltageV,
+  current_a: (reading) => reading.currentA,
+  power_factor: (reading) => reading.powerFactor,
+};
 
-export interface Detection {
-  type: DetectionType;
-  rangeStart: Date;
-  rangeEnd: Date;
-  variables: string[];
-  maxZ: number | null;
-  variationPct: number | null;
-  extras?: Record<string, number>;
-}
-
-export interface ConsolidatedDetection {
-  detectionType: string; // comma-joined, e.g. "SPIKE,PERSISTENT_CHANGE"
-  rangeStart: Date;
-  rangeEnd: Date;
-  variables: string[];
-  maxZ: number | null;
-  variationPct: number | null;
-  signals: Record<string, unknown>;
+function signalValues(signal: Signal, readings: ReadingPoint[]): number[] {
+  return readings.map(SIGNAL_PICKERS[signal]);
 }
 
 function zScore(value: number, mean: number | null, std: number | null): number | null {
@@ -73,18 +65,6 @@ function groupByDay(readings: ReadingPoint[]): Map<number, ReadingPoint[]> {
   return groups;
 }
 
-function mean(values: number[]): number | null {
-  if (values.length === 0) return null;
-  return values.reduce((a, b) => a + b, 0) / values.length;
-}
-
-function popStd(values: number[], knownMean?: number | null): number | null {
-  if (values.length === 0) return null;
-  const m = knownMean ?? mean(values);
-  if (m === null) return null;
-  return Math.sqrt(values.reduce((a, b) => a + (b - m) ** 2, 0) / values.length);
-}
-
 /** SPIKE: contiguous runs of readings with two-tailed |z| > 3 on consumption. */
 function detectSpikes(readings: ReadingPoint[], baseline: MeterBaseline): Detection[] {
   const { mean: mu, std: sigma } = baseline.consumption_kwh;
@@ -102,12 +82,11 @@ function detectSpikes(readings: ReadingPoint[], baseline: MeterBaseline): Detect
       );
       const variationPct = mu !== 0 ? ((spikeReading.consumptionKwh - mu) / mu) * 100 : null;
       const variables = ["consumption_kwh", "current_a", "power_factor"].filter((signal) => {
-        const stats = baseline[signal as keyof MeterBaseline];
+        const stats = baseline[signal as Signal];
         if (stats.mean === null || stats.std === null || stats.std === 0) return false;
-        return run.some((r) => {
-          const value = signal === "consumption_kwh" ? r.consumptionKwh : signal === "current_a" ? r.currentA : r.powerFactor;
-          return Math.abs(zScore(value, stats.mean, stats.std) ?? 0) > Z_THRESHOLD;
-        });
+        return signalValues(signal as Signal, run).some(
+          (value) => Math.abs(zScore(value, stats.mean, stats.std) ?? 0) > Z_THRESHOLD,
+        );
       });
       detections.push({
         type: "SPIKE",
@@ -220,18 +199,9 @@ function detectPersistentChange(readings: ReadingPoint[], baseline: MeterBaselin
   const postReadings = readings.filter((r) => r.timestamp.getTime() >= changeStart.getTime());
   const variables = ["consumption_kwh", "current_a", "power_factor", "voltage_v"].filter(
     (signal) => {
-      const stats = baseline[signal as keyof MeterBaseline];
+      const stats = baseline[signal as Signal];
       if (stats.mean === null || stats.mean === 0) return false;
-      const values = postReadings.map((r) =>
-        signal === "consumption_kwh"
-          ? r.consumptionKwh
-          : signal === "current_a"
-            ? r.currentA
-            : signal === "power_factor"
-              ? r.powerFactor
-              : r.voltageV,
-      );
-      const postMean = mean(values);
+      const postMean = mean(signalValues(signal as Signal, postReadings));
       return postMean !== null && Math.abs((postMean - stats.mean) / stats.mean) > PERSISTENT_DEVIATION;
     },
   );
@@ -273,9 +243,9 @@ function detectDataQuality(readings: ReadingPoint[], baseline: MeterBaseline): D
     if (Math.abs((cMean - mu) / mu) >= DQ_CONSUMPTION_TOLERANCE) continue;
 
     const voltageRatio =
-      (popStd(bucket.map((r) => r.voltageV)) ?? 0) / (baseline.voltage_v.std ?? 1);
+      (populationStd(signalValues("voltage_v", bucket)) ?? 0) / (baseline.voltage_v.std ?? 1);
     const pfRatio =
-      (popStd(bucket.map((r) => r.powerFactor)) ?? 0) / (baseline.power_factor.std ?? 1);
+      (populationStd(signalValues("power_factor", bucket)) ?? 0) / (baseline.power_factor.std ?? 1);
 
     if (voltageRatio > DQ_STD_RATIO || pfRatio > DQ_STD_RATIO) {
       dqDays.push({ key, voltageRatio, pfRatio });
@@ -292,6 +262,10 @@ function detectDataQuality(readings: ReadingPoint[], baseline: MeterBaseline): D
   const maxVoltageRatio = Math.max(...dqDays.map((d) => d.voltageRatio));
   const maxPfRatio = Math.max(...dqDays.map((d) => d.pfRatio));
 
+  // Day-mean over baseline-mean ratio (≈100 for stable consumption). The bucket
+  // is never empty, but keep the null-safe fallback that the original had.
+  const dayMean = mean(signalValues("consumption_kwh", startBucket));
+
   return [
     {
       type: "DATA_QUALITY",
@@ -299,7 +273,7 @@ function detectDataQuality(readings: ReadingPoint[], baseline: MeterBaseline): D
       rangeEnd: endBucket[endBucket.length - 1]!.timestamp,
       variables: ["voltage_v", "power_factor"],
       maxZ: null,
-      variationPct: mu !== 0 ? ((mean(startBucket.map((r) => r.consumptionKwh)) ?? mu - mu) / mu) * 100 : null,
+      variationPct: mu !== 0 ? ((dayMean ?? 0) / mu) * 100 : null,
       extras: { voltage_sd_ratio: maxVoltageRatio, power_factor_sd_ratio: maxPfRatio },
     },
   ];

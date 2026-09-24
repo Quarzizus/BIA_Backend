@@ -1,10 +1,14 @@
 /**
- * Baseline statistics for the meters read APIs (PR2 scope).
+ * Baseline statistics — shared domain (PR2/PR3).
  *
- * PR3's analysis module (baseline.calculator.ts) will build the full pipeline
- * on top of the same first-7-days rule; this minimal shared helper is exposed
- * here because the meters APIs need the baseline math now.
+ * Canonical pure implementation of the first-7-days baseline rule (design D9:
+ * population standard deviation). Consumed by the meters read APIs, the
+ * analysis pipeline (baseline.calculator) and the detector.
+ *
+ * This module is pure: no zod, no Prisma client.
  */
+
+import { DAY_MS } from "./time";
 
 export const BASELINE_WINDOW_DAYS = 7;
 
@@ -52,7 +56,7 @@ export function baselineWindow(
   days: number = BASELINE_WINDOW_DAYS,
 ): BaselineReading[] {
   if (readings.length === 0) return [];
-  const cutoff = readings[0]!.timestamp.getTime() + days * 24 * 60 * 60 * 1000;
+  const cutoff = readings[0]!.timestamp.getTime() + days * DAY_MS;
   return readings.filter((reading) => reading.timestamp.getTime() < cutoff);
 }
 
