@@ -6,9 +6,10 @@ RUN bun install --frozen-lockfile
 
 COPY . .
 
-# The generated Prisma client is gitignored, so it must be built in the image.
-# prisma.config.ts requires DATABASE_URL at config load time; the compose
-# service environment overrides this default at runtime.
+# El cliente Prisma generado está en gitignore, así que debe construirse en la
+# imagen. prisma.config.ts requiere DATABASE_URL al cargar la config; el servicio
+# de compose sobreescribe este default en runtime.
+
 ENV DATABASE_URL="postgresql://bia:bia@postgres:5432/bia_dev"
 RUN bunx prisma generate
 
