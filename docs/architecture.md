@@ -43,6 +43,14 @@ graph LR
     Modulos --> db[(PostgreSQL)]
 ```
 
+## Por qué esta arquitectura
+
+**Monolito modular por capas** — el punto de equilibrio para el tamaño actual:
+
+- **No más potente** (microservicios, CQRS, colas): costo de distribución sin beneficio a esta escala; el pipeline ya está aislado en `src/modules/analysis/stages/` y puede extraerse a un worker si hace falta.
+- **No menos potente** (lógica en rutas): perderíamos testabilidad, validación en el borde (zod), abstracción de persistencia y una IA reemplazable.
+- **Regla**: mientras distribuir cueste más que crecer el monolito, se queda monolito.
+
 ## Pipeline de análisis
 
 Un análisis recorre 3 etapas:
@@ -81,3 +89,7 @@ flowchart LR
 | 409 | `INVALID_STATUS_TRANSITION` | Transición de estado ilegal |
 | 503 | `AI_NOT_CONFIGURED` | Faltan las variables `AI_*` |
 | 500 | `INTERNAL_ERROR` | Error no manejado |
+
+## Documentación
+
+La API se documenta con una spec OpenAPI en `docs/openapi.yaml`, servida por Scalar en `http://localhost:3000/docs` (spec cruda en `/openapi.yaml`).

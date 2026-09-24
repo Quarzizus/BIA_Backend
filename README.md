@@ -17,6 +17,8 @@ curl http://localhost:3000/          # → {"status":"ok"}
 curl http://localhost:3000/meters    # → 12 medidores
 ```
 
+Documentación interactiva de la API: http://localhost:3000/docs (spec OpenAPI en http://localhost:3000/openapi.yaml).
+
 Para detener: `docker compose down` (con `-v` elimina también el volumen de datos; el seed lo re-crea al arrancar de nuevo).
 
 ## Variables de entorno

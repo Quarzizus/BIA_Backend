@@ -1,0 +1,808 @@
+openapi: 3.1.0
+info:
+  title: AI Energy Management Platform API
+  version: 0.1.0
+  description: |
+    API REST de la plataforma de gestión de medidores eléctricos. La IA detecta,
+    clasifica, explica y prioriza anomalías en el consumo eléctrico.
+
+    El análisis es asíncrono: `POST /ai/analyze` crea un run y responde 202;
+    el progreso se consulta con `GET /ai/analysis/{id}`.
+
+    Todas las fechas son ISO 8601 en UTC. Los errores usan un envelope uniforme:
+    `{"error": {"code": "...", "message": "..."}}`.
+servers:
+  - url: http://localhost:3000
+    description: Entorno local (docker compose)
+
+tags:
+  - name: Sistema
+    description: Salud del servicio
+  - name: Medidores
+    description: Catálogo de medidores, detalle y lecturas
+  - name: Anomalías
+    description: Anomalías detectadas y su gestión
+  - name: Dashboard
+    description: Resumen para el panel de control
+  - name: Análisis
+    description: Pipeline de análisis asíncrono con IA
+
+paths:
+  /:
+    get:
+      tags: [Sistema]
+      summary: Estado del servicio
+      operationId: getHealth
+      responses:
+        "200":
+          description: El servicio está operativo
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /meters:
+    get:
+      tags: [Medidores]
+      summary: Lista de medidores
+      description: |
+        Todos los medidores ordenados por código, con el consumo de su última
+        lectura, la variación porcentual vs el baseline (primeros 7 días) y el
+        estado derivado.
+      operationId: listMeters
+      responses:
+        "200":
+          description: Lista de medidores
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MeterSummary"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /meters/{meterId}:
+    get:
+      tags: [Medidores]
+      summary: Detalle de un medidor
+      description: |
+        Estado actual, estadísticas de baseline, variación porcentual y el
+        historial completo de lecturas del medidor.
+      operationId: getMeter
+      parameters:
+        - $ref: "#/components/parameters/MeterId"
+      responses:
+        "200":
+          description: Detalle del medidor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeterDetail"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /meters/{meterId}/readings:
+    get:
+      tags: [Medidores]
+      summary: Lecturas de un medidor en un rango
+      description: |
+        Lecturas horarias del medidor ordenadas ascendentemente, filtradas por
+        `from`/`to` (ISO 8601 UTC, inclusivos). Sin filtros se devuelve el
+        historial completo.
+      operationId: listReadings
+      parameters:
+        - $ref: "#/components/parameters/MeterId"
+        - $ref: "#/components/parameters/ReadingsFrom"
+        - $ref: "#/components/parameters/ReadingsTo"
+      responses:
+        "200":
+          description: Lecturas en el rango solicitado
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ReadingDto"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /anomalies:
+    get:
+      tags: [Anomalías]
+      summary: Lista de anomalías
+      description: Anomalías detectadas, opcionalmente filtradas por estado y severidad.
+      operationId: listAnomalies
+      parameters:
+        - $ref: "#/components/parameters/AnomalyStatusFilter"
+        - $ref: "#/components/parameters/AnomalySeverityFilter"
+      responses:
+        "200":
+          description: Lista de anomalías
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AnomalyListItem"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /anomalies/{id}:
+    get:
+      tags: [Anomalías]
+      summary: Detalle de una anomalía
+      description: |
+        Información completa para la investigación: rango afectado, tipo de
+        detección, evidencia estadística por variable, explicación, acción
+        recomendada y el evento relacionado si existe.
+      operationId: getAnomaly
+      parameters:
+        - $ref: "#/components/parameters/AnomalyId"
+      responses:
+        "200":
+          description: Detalle de la anomalía
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnomalyDetail"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /anomalies/{id}/status:
+    patch:
+      tags: [Anomalías]
+      summary: Actualiza el estado de una anomalía
+      description: |
+        Transición de estado válida: `OPEN` → `INVESTIGATING` → `RESOLVED`.
+        Cualquier otra transición responde 409. Al cambiar el estado se recalcula
+        el estado del medidor asociado.
+      operationId: updateAnomalyStatus
+      parameters:
+        - $ref: "#/components/parameters/AnomalyId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StatusUpdate"
+      responses:
+        "200":
+          description: Anomalía con el estado actualizado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnomalyDetail"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Transición de estado ilegal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  code: INVALID_STATUS_TRANSITION
+                  message: Cannot transition anomaly from RESOLVED to OPEN
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /dashboard/summary:
+    get:
+      tags: [Dashboard]
+      summary: Resumen del dashboard
+      description: |
+        Consumo total, medidores en alerta/crítico, anomalías abiertas por
+        severidad y las anomalías abiertas más recientes.
+      operationId: getDashboardSummary
+      responses:
+        "200":
+          description: Resumen del dashboard
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /ai/analyze:
+    post:
+      tags: [Análisis]
+      summary: Inicia un análisis asíncrono
+      description: |
+        Crea un run de análisis y responde 202 inmediatamente; el pipeline corre
+        en segundo plano. Solo puede haber un run en curso a la vez.
+      operationId: startAnalysis
+      responses:
+        "202":
+          description: Run de análisis creado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisAccepted"
+        "409":
+          description: Ya hay un análisis en curso
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  code: ANALYSIS_IN_PROGRESS
+                  message: Unique constraint violated on lockToken
+        "503":
+          description: El LLM no está configurado (faltan variables `AI_*`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  code: AI_NOT_CONFIGURED
+                  message: "LLM is not configured: AI_API_KEY, AI_BASE_URL and AI_MODEL are required"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /ai/analysis/{id}:
+    get:
+      tags: [Análisis]
+      summary: Estado de un análisis
+      description: |
+        Estado del run (`RUNNING`, `COMPLETED` o `FAILED`), resumen, número de
+        anomalías consolidadas y si el LLM participó. Endpoint de polling.
+      operationId: getAnalysisStatus
+      parameters:
+        - $ref: "#/components/parameters/AnalysisRunId"
+      responses:
+        "200":
+          description: Estado del run de análisis
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisRunStatus"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+  parameters:
+    MeterId:
+      name: meterId
+      in: path
+      required: true
+      description: Código público del medidor (p. ej. `M-109`)
+      schema:
+        type: string
+    AnomalyId:
+      name: id
+      in: path
+      required: true
+      description: ID de la anomalía (cuid)
+      schema:
+        type: string
+    AnalysisRunId:
+      name: id
+      in: path
+      required: true
+      description: ID del run de análisis (cuid)
+      schema:
+        type: string
+    ReadingsFrom:
+      name: from
+      in: query
+      required: false
+      description: Inicio del rango, inclusivo (ISO 8601 UTC, p. ej. `2026-09-12T13:00:00Z`)
+      schema:
+        type: string
+        format: date-time
+    ReadingsTo:
+      name: to
+      in: query
+      required: false
+      description: Fin del rango, inclusivo (ISO 8601 UTC, p. ej. `2026-09-12T15:00:00Z`)
+      schema:
+        type: string
+        format: date-time
+    AnomalyStatusFilter:
+      name: status
+      in: query
+      required: false
+      description: Filtra por estado de la anomalía
+      schema:
+        $ref: "#/components/schemas/AnomalyStatus"
+    AnomalySeverityFilter:
+      name: severity
+      in: query
+      required: false
+      description: Filtra por severidad
+      schema:
+        $ref: "#/components/schemas/Severity"
+
+  responses:
+    ValidationError:
+      description: Entrada inválida (parámetro, query o body)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: "from: from must not be after to"
+    NotFound:
+      description: Recurso inexistente
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: NOT_FOUND
+              message: Resource not found
+    InternalError:
+      description: Error interno no manejado
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: INTERNAL_ERROR
+              message: Internal server error
+
+  schemas:
+    Error:
+      type: object
+      description: Envelope uniforme de error
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: |
+                Código del error: `VALIDATION_ERROR`, `NOT_FOUND`,
+                `ANALYSIS_IN_PROGRESS`, `INVALID_STATUS_TRANSITION`,
+                `AI_NOT_CONFIGURED` o `INTERNAL_ERROR`.
+            message:
+              type: string
+              description: Descripción legible del error
+
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+          description: Estado del servicio
+
+    MeterStatus:
+      type: string
+      enum: [NORMAL, ALERT, CRITICAL]
+
+    MeterSummary:
+      type: object
+      required:
+        - id
+        - meter_id
+        - name
+        - location
+        - status
+        - consumption_kwh
+        - variation_pct
+        - latest_reading_at
+      properties:
+        id:
+          type: string
+          description: ID interno del medidor (cuid)
+        meter_id:
+          type: string
+          description: Código público del medidor (p. ej. `M-101`)
+        name:
+          type: string
+        location:
+          type: string
+        status:
+          $ref: "#/components/schemas/MeterStatus"
+        consumption_kwh:
+          type: [number, "null"]
+          description: Consumo de la última lectura; null si el medidor no tiene lecturas
+        variation_pct:
+          type: [number, "null"]
+          description: Variación % de la última lectura vs la media del baseline
+        latest_reading_at:
+          type: [string, "null"]
+          format: date-time
+          description: Timestamp de la última lectura
+
+    SignalStats:
+      type: object
+      description: Media y desviación estándar poblacional de una señal
+      required: [mean, std]
+      properties:
+        mean:
+          type: [number, "null"]
+        std:
+          type: [number, "null"]
+
+    BaselineStats:
+      type: object
+      description: Estadísticas del baseline (primeros 7 días de lecturas)
+      required: [consumption_kwh, voltage_v, current_a, power_factor]
+      properties:
+        consumption_kwh:
+          $ref: "#/components/schemas/SignalStats"
+        voltage_v:
+          $ref: "#/components/schemas/SignalStats"
+        current_a:
+          $ref: "#/components/schemas/SignalStats"
+        power_factor:
+          $ref: "#/components/schemas/SignalStats"
+
+    ReadingDto:
+      type: object
+      required: [timestamp, consumption_kwh, voltage_v, current_a, power_factor, status]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: Timestamp de la lectura (ISO 8601 UTC)
+        consumption_kwh:
+          type: number
+          description: Consumo en kWh
+        voltage_v:
+          type: number
+          description: Voltaje en V
+        current_a:
+          type: number
+          description: Corriente en A
+        power_factor:
+          type: number
+          description: Factor de potencia
+        status:
+          type: string
+          description: Estado de la lectura (en el dataset actual, `OK`)
+
+    CurrentReading:
+      type: object
+      description: Lectura más reciente del medidor
+      required: [consumption_kwh, voltage_v, current_a, power_factor, timestamp, status]
+      properties:
+        consumption_kwh:
+          type: number
+        voltage_v:
+          type: number
+        current_a:
+          type: number
+        power_factor:
+          type: number
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: string
+
+    MeterDetail:
+      type: object
+      required:
+        - id
+        - meter_id
+        - name
+        - location
+        - status
+        - current
+        - baseline
+        - variation_pct
+        - history
+      properties:
+        id:
+          type: string
+        meter_id:
+          type: string
+        name:
+          type: string
+        location:
+          type: string
+        status:
+          $ref: "#/components/schemas/MeterStatus"
+        current:
+          anyOf:
+            - $ref: "#/components/schemas/CurrentReading"
+            - type: "null"
+          description: Lectura actual; null si el medidor no tiene lecturas
+        baseline:
+          $ref: "#/components/schemas/BaselineStats"
+        variation_pct:
+          type: [number, "null"]
+        history:
+          type: array
+          description: Historial completo de lecturas, ascendente
+          items:
+            $ref: "#/components/schemas/ReadingDto"
+
+    AnomalyType:
+      type: string
+      enum: [REAL_ANOMALY, EXPLAINABLE_ANOMALY, FALSE_POSITIVE, DATA_QUALITY]
+
+    Severity:
+      type: string
+      enum: [HIGH, MEDIUM, LOW]
+
+    AnomalyStatus:
+      type: string
+      enum: [OPEN, INVESTIGATING, RESOLVED]
+
+    EventType:
+      type: string
+      enum: [OPERATIONAL_CHANGE, SCHEDULED_OUTAGE, DATA_QUALITY, UNKNOWN]
+
+    AnomalyListItem:
+      type: object
+      required:
+        - id
+        - meter_id
+        - type
+        - severity
+        - confidence
+        - status
+        - recommended_action
+        - detected_at
+      properties:
+        id:
+          type: string
+          description: ID de la anomalía (cuid)
+        meter_id:
+          type: string
+          description: Código público del medidor afectado
+        type:
+          $ref: "#/components/schemas/AnomalyType"
+        severity:
+          $ref: "#/components/schemas/Severity"
+        confidence:
+          type: number
+          description: Confianza de la clasificación (HIGH 0.99, MEDIUM 0.9, LOW 0.8)
+        status:
+          $ref: "#/components/schemas/AnomalyStatus"
+        recommended_action:
+          type: [string, "null"]
+          description: Acción recomendada en español (p. ej. `Revisar la instalación del medidor.`)
+        detected_at:
+          type: string
+          format: date-time
+
+    VariableEvidence:
+      type: object
+      description: |
+        Evidencia por variable sobre el rango afectado: media del baseline
+        (primeros 7 días) vs media reciente de las lecturas del rango.
+      required: [baseline_mean, recent_mean, variation_pct, max_z]
+      properties:
+        baseline_mean:
+          type: [number, "null"]
+        recent_mean:
+          type: [number, "null"]
+        variation_pct:
+          type: [number, "null"]
+          description: Variación % de la media reciente vs el baseline
+        max_z:
+          type: [number, "null"]
+          description: Máximo |z| observado en el rango
+
+    AnomalySignals:
+      type: object
+      description: |
+        Evidencia estadística consolidada de la detección: agregados del rango
+        afectado más evidencia por variable. Las claves extra dependen del tipo
+        de detección (`voltage_sd_ratio` y `power_factor_sd_ratio` para
+        `DATA_QUALITY`).
+      required: [max_z, variation_pct, variables, per_variable]
+      properties:
+        max_z:
+          type: [number, "null"]
+          description: Máximo |z| del consumo en el rango
+        variation_pct:
+          type: [number, "null"]
+          description: Variación % del consumo vs el baseline
+        variables:
+          type: array
+          description: Señales implicadas (`consumption_kwh`, `current_a`, `power_factor`, `voltage_v`)
+          items:
+            type: string
+        per_variable:
+          type: object
+          description: Evidencia por variable sobre el rango afectado
+          additionalProperties:
+            $ref: "#/components/schemas/VariableEvidence"
+        voltage_sd_ratio:
+          type: [number, "null"]
+          description: "Extra de `DATA_QUALITY`: razón std de voltaje del día vs baseline"
+        power_factor_sd_ratio:
+          type: [number, "null"]
+          description: "Extra de `DATA_QUALITY`: razón std de factor de potencia del día vs baseline"
+
+    RelatedEvent:
+      type: object
+      description: Evento del medidor relacionado con la anomalía (si existe)
+      required: [id, type, timestamp, description]
+      properties:
+        id:
+          type: string
+        type:
+          $ref: "#/components/schemas/EventType"
+        timestamp:
+          type: string
+          format: date-time
+        description:
+          type: string
+
+    AnomalyDetail:
+      allOf:
+        - $ref: "#/components/schemas/AnomalyListItem"
+        - type: object
+          required:
+            - range_start
+            - range_end
+            - detection_type
+            - signals
+            - reason
+            - related_event
+            - analysis_run_id
+          properties:
+            range_start:
+              type: string
+              format: date-time
+              description: Inicio del rango afectado
+            range_end:
+              type: string
+              format: date-time
+              description: Fin del rango afectado
+            detection_type:
+              type: string
+              description: Tipos de detección separados por coma (p. ej. `SPIKE,PERSISTENT_CHANGE`)
+            signals:
+              $ref: "#/components/schemas/AnomalySignals"
+            reason:
+              type: [string, "null"]
+              description: Explicación en español generada por la IA
+            related_event:
+              anyOf:
+                - $ref: "#/components/schemas/RelatedEvent"
+                - type: "null"
+            analysis_run_id:
+              type: string
+              description: ID del run de análisis que la detectó
+
+    StatusUpdate:
+      type: object
+      description: Transición de estado solicitada
+      required: [status]
+      properties:
+        status:
+          $ref: "#/components/schemas/AnomalyStatus"
+
+    RecentAnomaly:
+      type: object
+      description: Anomalía abierta reciente para el dashboard
+      required: [id, meter_id, type, severity, status, detected_at]
+      properties:
+        id:
+          type: string
+        meter_id:
+          type: string
+        type:
+          $ref: "#/components/schemas/AnomalyType"
+        severity:
+          $ref: "#/components/schemas/Severity"
+        status:
+          $ref: "#/components/schemas/AnomalyStatus"
+        detected_at:
+          type: string
+          format: date-time
+
+    OpenBySeverity:
+      type: object
+      description: Anomalías abiertas agrupadas por severidad
+      required: [HIGH, MEDIUM, LOW]
+      properties:
+        HIGH:
+          type: integer
+        MEDIUM:
+          type: integer
+        LOW:
+          type: integer
+
+    DashboardSummary:
+      type: object
+      required:
+        - total_consumption
+        - meters_alert
+        - meters_critical
+        - open_by_severity
+        - recent_anomalies
+      properties:
+        total_consumption:
+          type: number
+          description: Suma del consumo de todas las lecturas (kWh)
+        meters_alert:
+          type: integer
+          description: Medidores en estado ALERT
+        meters_critical:
+          type: integer
+          description: Medidores en estado CRITICAL
+        open_by_severity:
+          $ref: "#/components/schemas/OpenBySeverity"
+        recent_anomalies:
+          type: array
+          description: Anomalías abiertas más recientes (máx. 5)
+          items:
+            $ref: "#/components/schemas/RecentAnomaly"
+
+    AnalysisStatus:
+      type: string
+      enum: [RUNNING, COMPLETED, FAILED]
+
+    AnalysisRunStatus:
+      type: object
+      required:
+        - id
+        - status
+        - summary
+        - anomaly_count
+        - llm_used
+        - started_at
+        - completed_at
+      properties:
+        id:
+          type: string
+          description: ID del run de análisis (cuid)
+        status:
+          $ref: "#/components/schemas/AnalysisStatus"
+        summary:
+          type: [string, "null"]
+          description: Resumen del run (presente al completar o fallar)
+        anomaly_count:
+          type: integer
+          description: Anomalías consolidadas por el run
+        llm_used:
+          type: boolean
+          description: Si el LLM participó en la clasificación/explicación
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: [string, "null"]
+          format: date-time
+
+    AnalysisAccepted:
+      type: object
+      description: Respuesta de creación del run de análisis
+      required: [analysis_id]
+      properties:
+        analysis_id:
+          type: string
+          description: ID del run creado; consultar con `GET /ai/analysis/{id}`
