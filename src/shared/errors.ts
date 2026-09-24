@@ -39,6 +39,29 @@ function isPrismaErrorLike(err: unknown): err is PrismaErrorLike {
   );
 }
 
+/**
+ * Collects the constraint identifiers involved in a unique-constraint violation.
+ * Prisma 6 exposes `meta.target` (column names); Prisma 7 with the driver
+ * adapter nests them under `meta.driverAdapterError.cause.constraint.index`
+ * (constraint name). Both shapes are handled so the lockToken check is robust.
+ */
+function uniqueTargets(meta: Record<string, unknown> | null | undefined): string[] {
+  if (!meta) return [];
+  const direct = meta.target;
+  const targets: string[] = [];
+  if (Array.isArray(direct)) targets.push(...direct.map(String));
+  else if (typeof direct === "string") targets.push(direct);
+
+  const adapter = meta.driverAdapterError as
+    | { cause?: { constraint?: { index?: unknown }; table?: unknown } }
+    | undefined;
+  const index = adapter?.cause?.constraint?.index;
+  if (typeof index === "string") targets.push(index);
+  const table = adapter?.cause?.table;
+  if (typeof table === "string") targets.push(table);
+  return targets;
+}
+
 /** Human-readable rendering of zod issues ("field: message; ..."). */
 export function formatZodIssues(error: ZodError): string {
   return error.issues
@@ -72,9 +95,10 @@ export function mapErrorToResponse(err: unknown): ErrorMapping {
           body: { error: { code: "NOT_FOUND", message: "Resource not found" } },
         };
       case "P2002": {
-        const target = err.meta?.target;
-        const targets = Array.isArray(target) ? target : [target];
-        const code = targets.includes("lockToken") ? "ANALYSIS_IN_PROGRESS" : "CONFLICT";
+        const targets = uniqueTargets(err.meta);
+        const code = targets.some((target) => target.toLowerCase().includes("locktoken"))
+          ? "ANALYSIS_IN_PROGRESS"
+          : "CONFLICT";
         return {
           status: 409,
           body: {

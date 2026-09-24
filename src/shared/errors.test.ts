@@ -48,6 +48,23 @@ describe("mapErrorToResponse", () => {
     expect(mapped.body.error.code).toBe("ANALYSIS_IN_PROGRESS");
   });
 
+  test("Prisma P2002 on lockToken via driver-adapter constraint (Prisma 7) maps to 409 ANALYSIS_IN_PROGRESS", () => {
+    const mapped = mapErrorToResponse({
+      code: "P2002",
+      meta: {
+        driverAdapterError: {
+          cause: {
+            originalCode: "23505",
+            constraint: { index: "analysis_runs_lockToken_key" },
+            table: "analysis_runs",
+          },
+        },
+      },
+    });
+    expect(mapped.status).toBe(409);
+    expect(mapped.body.error.code).toBe("ANALYSIS_IN_PROGRESS");
+  });
+
   test("Prisma P2002 on another field maps to 409 CONFLICT", () => {
     const mapped = mapErrorToResponse({ code: "P2002", meta: { target: ["meterId"] } });
     expect(mapped.status).toBe(409);
