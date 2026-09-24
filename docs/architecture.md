@@ -45,11 +45,13 @@ graph LR
 
 ## Por qué esta arquitectura
 
-**Monolito modular por capas** — el punto de equilibrio para el tamaño actual:
+**Arquitectura modular fue la justa para este problema.** No hizo falta ni clean architecture ni DDD completos:
 
-- **No más potente** (microservicios, CQRS, colas): costo de distribución sin beneficio a esta escala; el pipeline ya está aislado en `src/modules/analysis/stages/` y puede extraerse a un worker si hace falta.
-- **No menos potente** (lógica en rutas): perderíamos testabilidad, validación en el borde (zod), abstracción de persistencia y una IA reemplazable.
-- **Regla**: mientras distribuir cueste más que crecer el monolito, se queda monolito.
+- **Modular**: módulos por feature (`meters`, `readings`, `anomalies`, `analysis`, `dashboard`) con una responsabilidad por archivo y fronteras claras. Suficiente para testabilidad, evolución y razonar sobre cada dominio sin pagar el costo de patrones pesados.
+- **Clean architecture completa no es necesaria**: su objetivo es aislar el dominio de la infraestructura con capas y puertos/adaptadores. Aquí la persistencia ya queda aislada en `*.repository.ts` y la IA es inyectable (`LlmClient`); añadir más anillos (use cases, adapters, interfaces por capa) sería ceremonia para un dominio de 9 endpoints.
+- **DDD completo no es necesario**: los módulos ya funcionan como *bounded contexts* ligeros (types puros en `*.domain.ts`, reglas de negocio en el dominio). Los rituales DDD (aggregates, domain events, lenguaje ubicuo formal) no aportan a este tamaño.
+
+Regla: si el dominio crece (nuevos contextos, más integraciones, equipos), se migra por partes — no se anticipa la ceremonia.
 
 ## Pipeline de análisis
 
