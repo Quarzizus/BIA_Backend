@@ -1,41 +1,30 @@
-import { PrismaClient } from "./generated/prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
-
-const DATABASE_URL = process.env.DATABASE_URL;
-if (!DATABASE_URL) {
-  console.error("[boot] DATABASE_URL environment variable is required");
-  process.exit(1);
-}
-
-const adapter = new PrismaPg({ connectionString: DATABASE_URL });
-const prisma = new PrismaClient({ adapter });
+import express from "express";
+import type { Express } from "express";
+import type { PrismaClient } from "./generated/prisma/client";
+import { errorMiddleware, notFoundHandler } from "./shared/errors";
+import { createMetersRouter } from "./modules/meters/routes";
+import { createReadingsRouter } from "./modules/readings/routes";
+import { createAnomaliesRouter } from "./modules/anomalies/routes";
+import { createDashboardRouter } from "./modules/dashboard/routes";
 
 /**
- * Verifies database connectivity by running a trivial query.
- * Feature routes and the full express app arrive in a later slice (PR2).
+ * Express app factory: JSON parsing, feature routers, catch-all 404 and the
+ * global error middleware (P2025→404, P2002→409, zod→400).
  */
-export async function verifyDatabaseConnection(): Promise<void> {
-  await prisma.$queryRaw`SELECT 1`;
-}
+export function createApp(prisma: PrismaClient): Express {
+  const app = express();
+  app.use(express.json());
 
-if (import.meta.main) {
-  const port = Number(process.env.PORT ?? 3000);
-
-  try {
-    await verifyDatabaseConnection();
-    console.log("[boot] database connectivity OK");
-  } catch (error) {
-    console.error("[boot] database connectivity FAILED:", error);
-    process.exit(1);
-  }
-
-  Bun.serve({
-    port,
-    fetch() {
-      return new Response(JSON.stringify({ status: "ok" }), {
-        headers: { "content-type": "application/json" },
-      });
-    },
+  app.get("/", (_req, res) => {
+    res.json({ status: "ok" });
   });
-  console.log(`[boot] listening on :${port}`);
+
+  app.use("/meters", createMetersRouter(prisma));
+  app.use("/meters", createReadingsRouter(prisma));
+  app.use("/anomalies", createAnomaliesRouter(prisma));
+  app.use("/dashboard", createDashboardRouter(prisma));
+
+  app.use(notFoundHandler);
+  app.use(errorMiddleware);
+  return app;
 }

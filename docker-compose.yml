@@ -30,7 +30,7 @@ services:
     ports:
       - "3000:3000"
     # Seed-on-start contract: apply migrations, seed idempotently, then boot.
-    command: sh -c "bunx prisma migrate deploy && bun prisma/seed.ts && bun src/app.ts"
+    command: sh -c "bunx prisma migrate deploy && bun prisma/seed.ts && bun src/server.ts"
 
 volumes:
   postgres-data:
