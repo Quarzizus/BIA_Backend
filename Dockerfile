@@ -14,4 +14,4 @@ ENV DATABASE_URL="postgresql://bia:bia@postgres:5432/bia_dev"
 RUN bunx prisma generate
 
 EXPOSE 3000
-CMD ["sh", "-c", "bunx prisma migrate deploy && bun prisma/seed.ts && bun src/app.ts"]
+CMD ["sh", "-c", "bunx prisma migrate deploy && bun prisma/seed.ts && bun src/server.ts"]
