@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { loadEnv, parseEnv } from "./env";
+import { parseEnv } from "./env";
 
 const valid = {
   DATABASE_URL: "postgresql://bia:bia@localhost:5432/bia_dev",

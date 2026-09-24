@@ -6,12 +6,12 @@ export const anomalyIdParam = z.object({
 });
 
 export const listQuery = z.object({
-  status: z.nativeEnum(AnomalyStatus).optional(),
-  severity: z.nativeEnum(Severity).optional(),
+  status: z.enum(AnomalyStatus).optional(),
+  severity: z.enum(Severity).optional(),
 });
 export type ListQuery = z.infer<typeof listQuery>;
 
 export const statusUpdate = z.object({
-  status: z.nativeEnum(AnomalyStatus),
+  status: z.enum(AnomalyStatus),
 });
 export type StatusUpdate = z.infer<typeof statusUpdate>;

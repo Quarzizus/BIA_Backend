@@ -5,8 +5,8 @@ export { meterIdParam };
 
 export const readingsQuery = z
   .object({
-    from: z.string().datetime().optional(),
-    to: z.string().datetime().optional(),
+    from: z.iso.datetime().optional(),
+    to: z.iso.datetime().optional(),
   })
   .refine(
     (query) =>
