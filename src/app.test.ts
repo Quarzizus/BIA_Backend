@@ -1,13 +1,17 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Server } from "node:http";
-import { getPrisma } from "./config/database";
+import { createTestPrisma, provisionTestDb, seedTestDb } from "./testing/testDb";
 import { createApp } from "./app";
+
+const prisma = createTestPrisma("bia_test_app");
 
 let server: Server;
 let baseUrl: string;
 
 beforeAll(async () => {
-  const app = createApp(getPrisma());
+  await provisionTestDb("bia_test_app");
+  await seedTestDb(prisma);
+  const app = createApp(prisma);
   server = app.listen(0);
   await new Promise<void>((resolve) => server.once("listening", resolve));
   baseUrl = `http://localhost:${(server.address() as { port: number }).port}`;
@@ -15,7 +19,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  await getPrisma().$disconnect();
+  await prisma.$disconnect();
 });
 
 describe("createApp wiring", () => {
@@ -29,7 +33,8 @@ describe("createApp wiring", () => {
   test("meters, readings, anomalies and dashboard routers are wired", async () => {
     const meters = await fetch(`${baseUrl}/meters`);
     expect(meters.status).toBe(200);
-    expect(((await meters.json()) as unknown[]).length).toBeGreaterThanOrEqual(12);
+    // Exacto: la base aislada solo contiene los 12 medidores sembrados.
+    expect(((await meters.json()) as unknown[]).length).toBe(12);
 
     const readings = await fetch(`${baseUrl}/meters/M-109/readings?from=2026-09-12T13:00:00Z&to=2026-09-12T15:00:00Z`);
     expect(readings.status).toBe(200);

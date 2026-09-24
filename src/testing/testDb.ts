@@ -5,20 +5,25 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { parseCsv, normalizeTimestampToUtc } from "../../prisma/seed";
 
 /**
- * Isolated analysis-pipeline test database.
+ * Bases de datos aisladas por archivo de test de integración.
  *
- * The analysis tests persist RUNNING analysis runs and anomalies; running them
- * against the shared bia_dev DB would race with parallel test files that assert
- * exact global state (server.test.ts sweeps RUNNING runs; anomalies.test.ts
- * asserts an exact anomaly count). This helper provisions a dedicated `bia_test`
- * database inside the same compose Postgres server and seeds it with the same
- * deterministic dataset, so the pipeline tests are fully isolated.
+ * Cada archivo de test que toca la base aprovisiona la suya propia
+ * (`bia_test_<dominio>`) dentro del mismo servidor Postgres de compose, de modo
+ * que los archivos que `bun test` corre en paralelo (un proceso por archivo)
+ * nunca compiten por el mismo estado: se eliminan las carreras por conteos
+ * exactos (p. ej. 12 vs 13 medidores) y las afirmaciones pueden ser estrictas.
+ * El dataset sembrado es idéntico al del seed real (12 meters / 4032 readings /
+ * 4 events), reutilizando los helpers puros del seed.
  */
 
 const ADMIN_URL = process.env.DATABASE_URL ?? "postgresql://bia:bia@localhost:5432/bia_dev";
-export const TEST_DB_URL = "postgresql://bia:bia@localhost:5432/bia_test";
 
-async function withPg(url: string, fn: (client: any) => Promise<void>): Promise<void> {
+/** URL de una base aislada por nombre, en el mismo servidor Postgres de compose. */
+export function testDbUrl(dbName: string): string {
+  return `postgresql://bia:bia@localhost:5432/${dbName}`;
+}
+
+async function withPg(url: string, fn: (client: import("pg").Client) => Promise<void>): Promise<void> {
   const { default: pg } = await import("pg");
   const client = new pg.Client({ connectionString: url });
   await client.connect();
@@ -29,36 +34,34 @@ async function withPg(url: string, fn: (client: any) => Promise<void>): Promise<
   }
 }
 
-async function databaseExists(client: any, name: string): Promise<boolean> {
+async function databaseExists(client: import("pg").Client, name: string): Promise<boolean> {
   const result = await client.query("SELECT 1 FROM pg_database WHERE datname = $1", [name]);
-  return result.rowCount > 0;
+  return (result.rowCount ?? 0) > 0;
 }
 
 /**
- * Ensures the isolated `bia_test` database exists with the current schema.
- * Idempotent: safe to call from every test file's beforeAll.
+ * Garantiza que la base aislada `<dbName>` exista con el schema actual.
+ * Idempotente: seguro llamarlo desde el beforeAll de cada archivo de test.
  */
-export async function provisionTestDb(): Promise<void> {
-  // 1. Create the database if missing (admin connection to the maintenance DB).
+export async function provisionTestDb(dbName: string): Promise<void> {
+  // 1. Crear la base si falta (conexión admin a la base de mantenimiento).
   const adminUrl = ADMIN_URL.replace(/\/[^/]*$/, "/postgres");
   await withPg(adminUrl, async (admin) => {
-    if (!(await databaseExists(admin, "bia_test"))) {
-      await admin.query('CREATE DATABASE bia_test OWNER bia');
+    if (!(await databaseExists(admin, dbName))) {
+      await admin.query(`CREATE DATABASE ${dbName} OWNER bia`);
     }
   });
 
-  // 2. Apply the migration SQL if the schema is missing (idempotent).
-  await withPg(TEST_DB_URL, async (client) => {
+  // 2. Aplicar el SQL de migración si falta el schema (idempotente).
+  await withPg(testDbUrl(dbName), async (client) => {
     const tables = await client.query(
       "SELECT 1 FROM information_schema.tables WHERE table_name = 'meters'",
     );
     if (tables.rowCount === 0) {
       const migrationDir = join(import.meta.dir, "../../prisma/migrations");
-      const migrationName = readFileSync(join(migrationDir, "migration_lock.toml"), "utf8");
-      void migrationName;
       const files = await import("node:fs/promises").then((fs) => fs.readdir(migrationDir));
       const initMigration = files.find((f) => f.includes("init"));
-      if (!initMigration) throw new Error("provisionTestDb: init migration not found");
+      if (!initMigration) throw new Error(`provisionTestDb: init migration not found for ${dbName}`);
       const sql = readFileSync(join(migrationDir, initMigration, "migration.sql"), "utf8");
       await client.query(sql);
     }
@@ -66,8 +69,9 @@ export async function provisionTestDb(): Promise<void> {
 }
 
 /**
- * Seeds the isolated database with the same 12/4032/4 dataset, reusing the
- * seed's exported pure helpers. Idempotent.
+ * Siembra la base aislada con el mismo dataset 12/4032/4, reutilizando los
+ * helpers puros exportados del seed. Idempotente: si los conteos ya coinciden
+ * no toca nada; si no, borra y recrea los datos dentro de una transacción.
  */
 export async function seedTestDb(prisma: PrismaClient): Promise<void> {
   const meterCount = await prisma.meter.count();
@@ -125,8 +129,8 @@ export async function seedTestDb(prisma: PrismaClient): Promise<void> {
   });
 }
 
-/** Builds a PrismaClient bound to the isolated test database. */
-export function createTestPrisma(): PrismaClient {
-  const adapter = new PrismaPg({ connectionString: TEST_DB_URL });
+/** Cliente Prisma conectado a la base aislada `<dbName>`. */
+export function createTestPrisma(dbName: string): PrismaClient {
+  const adapter = new PrismaPg({ connectionString: testDbUrl(dbName) });
   return new PrismaClient({ adapter });
 }

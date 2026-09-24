@@ -7,7 +7,7 @@ import {
   populationStd,
   variationPct,
   type BaselineReading,
-} from "../../../shared/domain/baseline";
+} from "../domain/baseline";
 
 function reading(
   consumptionKwh: number,

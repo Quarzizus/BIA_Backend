@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { getPrisma } from "../../../config/database";
+import { createTestPrisma, provisionTestDb, seedTestDb } from "../../../testing/testDb";
 import { startTestServer, type TestServer } from "../../../testing/testServer";
 import { createDashboardRouter } from "../dashboard.routes";
 
-const prisma = getPrisma();
+const prisma = createTestPrisma("bia_test_dashboard");
 const FIXTURE_METERS = ["M-ZZ5", "M-ZZ6"];
 
 let server: TestServer;
@@ -11,6 +11,9 @@ let runId: string;
 let criticalAnomalyId: string;
 
 beforeAll(async () => {
+  await provisionTestDb("bia_test_dashboard");
+  await seedTestDb(prisma);
+
   const [criticalMeter, alertMeter] = await prisma.$transaction([
     prisma.meter.create({
       data: { meterId: "M-ZZ5", name: "Critical Fixture", location: "Site 95", status: "CRITICAL" },
@@ -107,11 +110,11 @@ describe("GET /dashboard/summary", () => {
 
   test("groups open anomalies by severity and excludes resolved ones", async () => {
     const body = (await (await fetch(`${server.baseUrl}/dashboard/summary`)).json()) as Record<string, any>;
-    // Fixture guarantees at least one OPEN HIGH and one OPEN MEDIUM; other
-    // parallel test files may add more, so assert lower bounds.
-    expect(body.open_by_severity.HIGH).toBeGreaterThanOrEqual(1);
-    expect(body.open_by_severity.MEDIUM).toBeGreaterThanOrEqual(1);
-    expect(typeof body.open_by_severity.LOW).toBe("number");
+    // Exacto: la base aislada solo contiene las anomalías de este fixture (1 HIGH
+    // y 1 MEDIUM abiertas; la HIGH y la LOW resueltas quedan excluidas).
+    expect(body.open_by_severity.HIGH).toBe(1);
+    expect(body.open_by_severity.MEDIUM).toBe(1);
+    expect(body.open_by_severity.LOW).toBe(0);
   });
 
   test("recent_anomalies includes the open critical anomaly with full fields", async () => {

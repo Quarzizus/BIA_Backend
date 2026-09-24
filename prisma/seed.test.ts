@@ -1,17 +1,26 @@
-import { beforeAll, expect, test } from "bun:test";
-import { PrismaClient } from "../src/generated/prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
-import { seed } from "./seed";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 
-const adapter = new PrismaPg({
-  connectionString: process.env.DATABASE_URL ?? "",
-});
-const prisma = new PrismaClient({ adapter });
+// La URL aislada debe quedar fija ANTES de importar ./seed: su adapter Prisma
+// se construye en tiempo de módulo (const DATABASE_URL en la raíz del módulo),
+// así que un import estático capturaría la bia_dev del .env. Los archivos de
+// test corren en procesos separados, de modo que este cambio no fuga hacia
+// otros tests. El esquema de URL replica testDbUrl() (mismo servidor de compose).
+process.env.DATABASE_URL = "postgresql://bia:bia@localhost:5432/bia_test_seed";
+
+const { seed } = await import("./seed");
+const { createTestPrisma, provisionTestDb } = await import("../src/testing/testDb");
+
+const prisma = createTestPrisma("bia_test_seed");
 
 beforeAll(async () => {
-  // Fresh run, then an immediate re-run: the re-run must be a no-op (idempotent).
+  await provisionTestDb("bia_test_seed");
+  // Seed fresco, luego un re-run inmediato: el re-run debe ser un no-op (idempotente).
   await seed();
   await seed();
+});
+
+afterAll(async () => {
+  await prisma.$disconnect();
 });
 
 test("fresh seed loads 12 meters, 4032 readings and 4 events", async () => {
@@ -21,7 +30,7 @@ test("fresh seed loads 12 meters, 4032 readings and 4 events", async () => {
 });
 
 test("re-run seed is idempotent: same counts, no constraint violations", async () => {
-  await seed(); // third invocation
+  await seed();
   expect(await prisma.meter.count()).toBe(12);
   expect(await prisma.reading.count()).toBe(4032);
   expect(await prisma.event.count()).toBe(4);

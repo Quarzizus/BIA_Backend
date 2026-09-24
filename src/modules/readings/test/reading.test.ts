@@ -1,12 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { getPrisma } from "../../../config/database";
+import { createTestPrisma, provisionTestDb, seedTestDb } from "../../../testing/testDb";
 import { startTestServer, type TestServer } from "../../../testing/testServer";
 import { createReadingsRouter } from "../reading.routes";
 
-const prisma = getPrisma();
+const prisma = createTestPrisma("bia_test_readings");
 let server: TestServer;
 
 beforeAll(async () => {
+  await provisionTestDb("bia_test_readings");
+  await seedTestDb(prisma);
   server = await startTestServer([{ path: "/meters", router: createReadingsRouter(prisma) }]);
 });
 

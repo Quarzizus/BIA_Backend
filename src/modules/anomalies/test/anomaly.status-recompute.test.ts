@@ -1,18 +1,18 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { getPrisma } from "../../../config/database";
+import { createTestPrisma, provisionTestDb, seedTestDb } from "../../../testing/testDb";
 import { startTestServer, type TestServer } from "../../../testing/testServer";
 import { createAnomaliesRouter } from "../anomaly.routes";
 import { createDashboardRouter } from "../../dashboard/dashboard.routes";
 
 /**
- * Design D4: Meter.status is maintained in the SAME transaction as anomaly
- * writes. On a PATCH transition the meter must reflect the most severe
- * ACTIVE (not RESOLVED) anomaly: HIGH -> CRITICAL, MEDIUM -> ALERT, else
- * NORMAL. Verify WARNING 1 proved PATCH never recomputed Meter.status, leaving
- * GET /dashboard/summary stale (meters_critical stuck at 1 with
- * open_by_severity.HIGH 0). These tests lock the corrected contract.
+ * Diseño D4: Meter.status se mantiene en la MISMA transacción que las escrituras
+ * de anomalías. En una transición PATCH el medidor debe reflejar la anomalía
+ * ACTIVE (no RESOLVED) más severa: HIGH -> CRITICAL, MEDIUM -> ALERT, si no
+ * NORMAL. El WARNING 1 verificó que PATCH nunca recalculaba Meter.status,
+ * dejando GET /dashboard/summary obsoleto (meters_critical atascado en 1 con
+ * open_by_severity.HIGH 0). Estos tests fijan el contrato corregido.
  */
-const prisma = getPrisma();
+const prisma = createTestPrisma("bia_test_status");
 const FIXTURE_METERS = ["M-ZZ7", "M-ZZ8"];
 
 let server: TestServer;
@@ -23,6 +23,9 @@ let highAnomalyId: string;
 let mediumAnomalyId: string;
 
 beforeAll(async () => {
+  await provisionTestDb("bia_test_status");
+  await seedTestDb(prisma);
+
   const [highMeter, mediumMeter] = await prisma.$transaction([
     prisma.meter.create({
       data: { meterId: "M-ZZ7", name: "Recompute Critical", location: "Site 97", status: "CRITICAL" },
@@ -115,8 +118,8 @@ describe("PATCH /anomalies/:id/status recomputes Meter.status (design D4)", () =
     const meter = await prisma.meter.findUnique({ where: { id: highMeterId } });
     expect(meter!.status).toBe("NORMAL");
 
-    // GET /dashboard/summary must now reflect the open anomalies: the only
-    // HIGH is resolved, the MEDIUM on M-ZZ8 is still open.
+    // GET /dashboard/summary debe reflejar ahora las anomalías abiertas: la
+    // única HIGH está resuelta, la MEDIUM de M-ZZ8 sigue abierta.
     const summary = (await (
       await fetch(`${server.baseUrl}/dashboard/summary`)
     ).json()) as Record<string, any>;
@@ -127,8 +130,8 @@ describe("PATCH /anomalies/:id/status recomputes Meter.status (design D4)", () =
   });
 
   test("resolving a HIGH leaves ALERT when a MEDIUM is still open (most severe open anomaly)", async () => {
-    // Simulate a second run on the medium meter: HIGH anomaly added while the
-    // MEDIUM is still open, run completion raised the meter to CRITICAL.
+    // Simular un segundo run sobre el medidor medium: se añade una HIGH mientras
+    // la MEDIUM sigue abierta; la finalización del run subió el medidor a CRITICAL.
     const extraHigh = await prisma.anomaly.create({
       data: {
         analysisRunId: runId,
@@ -161,7 +164,7 @@ describe("PATCH /anomalies/:id/status recomputes Meter.status (design D4)", () =
       expect(res.status).toBe(200);
     }
 
-    // The MEDIUM anomaly is still open, so the meter must NOT fall to NORMAL.
+    // La anomalía MEDIUM sigue abierta, así que el medidor NO debe caer a NORMAL.
     const meter = await prisma.meter.findUnique({ where: { id: mediumMeterId } });
     expect(meter!.status).toBe("ALERT");
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { ApiError, formatZodIssues, mapErrorToResponse } from "./errors";
+import { ApiError, formatZodIssues, mapErrorToResponse } from "../errors";
 
 describe("ApiError", () => {
   test("carries status, code and message", () => {
@@ -29,7 +29,7 @@ describe("mapErrorToResponse", () => {
   });
 
   test("ZodError maps to 400 VALIDATION_ERROR", () => {
-    const parsed = z.object({ from: z.string().datetime() }).safeParse({ from: "not-a-date" });
+    const parsed = z.object({ from: z.iso.datetime() }).safeParse({ from: "not-a-date" });
     if (parsed.success) throw new Error("fixture expected to fail validation");
     const mapped = mapErrorToResponse(parsed.error);
     expect(mapped.status).toBe(400);
@@ -80,7 +80,7 @@ describe("mapErrorToResponse", () => {
 
 describe("formatZodIssues", () => {
   test("includes the failing field path and message", () => {
-    const parsed = z.object({ from: z.string().datetime() }).safeParse({ from: "x" });
+    const parsed = z.object({ from: z.iso.datetime() }).safeParse({ from: "x" });
     if (parsed.success) throw new Error("fixture expected to fail validation");
     const message = formatZodIssues(parsed.error);
     expect(message).toContain("from");

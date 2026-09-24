@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { getPrisma } from "../../../config/database";
+import { createTestPrisma, provisionTestDb, seedTestDb } from "../../../testing/testDb";
 import { startTestServer, type TestServer } from "../../../testing/testServer";
 import { createAnomaliesRouter } from "../anomaly.routes";
 
-const prisma = getPrisma();
+const prisma = createTestPrisma("bia_test_anomalies");
 const FIXTURE_METERS = ["M-ZZ1", "M-ZZ2", "M-ZZ3", "M-ZZ4"];
 
 let server: TestServer;
@@ -11,6 +11,9 @@ let runId: string;
 let anomalyIds: { real: string; fp: string; dq: string; explainable: string };
 
 beforeAll(async () => {
+  await provisionTestDb("bia_test_anomalies");
+  await seedTestDb(prisma);
+
   const meters = await prisma.$transaction(
     FIXTURE_METERS.map((code, index) =>
       prisma.meter.create({
@@ -227,7 +230,7 @@ describe("PATCH /anomalies/:id/status", () => {
   });
 
   test("returns 409 INVALID_STATUS_TRANSITION when patching OPEN on a RESOLVED anomaly (spec)", async () => {
-    // Make the state deterministic regardless of test order.
+    // Hacer el estado determinista independientemente del orden de los tests.
     await prisma.anomaly.update({
       where: { id: anomalyIds.fp },
       data: { status: "RESOLVED" },

@@ -1,16 +1,27 @@
-import { describe, expect, test } from "bun:test";
-import { getPrisma } from "./config/database";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { createTestPrisma, provisionTestDb, seedTestDb } from "./testing/testDb";
 import { recoverOrphanedRuns } from "./server";
+
+const prisma = createTestPrisma("bia_test_server");
+
+beforeAll(async () => {
+  await provisionTestDb("bia_test_server");
+  await seedTestDb(prisma);
+});
+
+afterAll(async () => {
+  await prisma.$disconnect();
+});
 
 describe("recoverOrphanedRuns (boot sweep)", () => {
   test("marks orphaned RUNNING runs as FAILED and clears the lock token", async () => {
-    const prisma = getPrisma();
     const run = await prisma.analysisRun.create({
       data: { status: "RUNNING", lockToken: "single" },
     });
     try {
       const count = await recoverOrphanedRuns(prisma);
-      expect(count).toBeGreaterThanOrEqual(1);
+      // Exacto: la base aislada solo contiene el run RUNNING creado arriba.
+      expect(count).toBe(1);
 
       const after = await prisma.analysisRun.findUnique({ where: { id: run.id } });
       expect(after!.status).toBe("FAILED");
@@ -18,14 +29,11 @@ describe("recoverOrphanedRuns (boot sweep)", () => {
       expect(after!.lockToken).toBeNull();
     } finally {
       await prisma.analysisRun.deleteMany({ where: { id: run.id } });
-      await prisma.$disconnect();
     }
   });
 
   test("returns 0 when no RUNNING runs exist", async () => {
-    const prisma = getPrisma();
     const count = await recoverOrphanedRuns(prisma);
     expect(count).toBe(0);
-    await prisma.$disconnect();
   });
 });

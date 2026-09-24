@@ -5,15 +5,15 @@ import {
   createTestPrisma,
   provisionTestDb,
   seedTestDb,
-} from "../../../testing/analysisTestDb";
+} from "../../../testing/testDb";
 
-const prisma = createTestPrisma();
+const prisma = createTestPrisma("bia_test_analysis");
 const FIXTURE_METERS = ["M-PZ1", "M-PZ2", "M-PZ3", "M-PZ4"];
 
 /**
- * Fake LLM (design D8): deterministic Spanish outputs, no network. The fixture
- * meters mirror the four ground-truth shapes so the runner exercises the full
- * 3-stage pipeline against the isolated test database.
+ * LLM falso (diseño D8): salidas deterministas en español, sin red. Los meters
+ * del fixture reflejan las cuatro formas ground-truth para que el runner
+ * ejercite el pipeline completo de 3 etapas contra la base de test aislada.
  */
 function createFakeLlm(overrides?: Partial<LlmClient>): LlmClient {
   return {
@@ -39,10 +39,10 @@ let service: AnalysisService;
 const createdRunIds: string[] = [];
 
 beforeAll(async () => {
-  await provisionTestDb();
+  await provisionTestDb("bia_test_analysis");
   await seedTestDb(prisma);
 
-  // Fixture meters mirroring the four ground-truth shapes on isolated codes.
+  // Meters del fixture que reflejan las cuatro formas ground-truth sobre códigos aislados.
   const meters = await prisma.$transaction(
     FIXTURE_METERS.map((code, index) =>
       prisma.meter.create({
@@ -59,18 +59,18 @@ beforeAll(async () => {
       for (let hour = 0; hour < 24; hour++) {
         const ts = new Date(Date.UTC(2026, 8, 1 + day, hour, 0, 0));
         const noise = hour % 2 === 0 ? 1 : -1;
-        let c = 50 + noise; // baseline 50
+        let c = 50 + noise;
         if (code === "M-PZ1") {
-          // REAL_ANOMALY-like: spike from day 11 (09-12) 14:00 sustained.
+          // Estilo REAL_ANOMALY: spike desde el día 11 (09-12) 14:00 sostenido.
           if (day >= 11 && hour >= 14) c = 110;
         } else if (code === "M-PZ2") {
-          // EXPLAINABLE-like: step to 71 from day 10 (09-11).
+          // Estilo EXPLAINABLE: paso a 71 desde el día 10 (09-11).
           if (day >= 10) c = 71 + noise;
         } else if (code === "M-PZ3") {
-          // FALSE_POSITIVE-like: 12h drop on day 7 (09-08) then recovery.
+          // Estilo FALSE_POSITIVE: caída de 12h el día 7 (09-08) y luego recuperación.
           if (day === 7 && hour < 12) c = 10;
         } else {
-          // DATA_QUALITY-like: stable consumption, wild voltage/pf on day 12-13.
+          // Estilo DATA_QUALITY: consumo estable, voltaje/pf salvajes en los días 12-13.
           c = 27.6;
         }
         readings.push({
@@ -88,7 +88,7 @@ beforeAll(async () => {
   }
   await prisma.reading.createMany({ data: readings });
 
-  // Events for coverage classification.
+  // Eventos para la clasificación por cobertura.
   await prisma.event.createMany({
     data: [
       {
@@ -138,8 +138,8 @@ afterAll(async () => {
 
 describe("runAnalysis pipeline", () => {
   test("creates one consolidated anomaly per affected meter with correct classification", async () => {
-    // Create the RUNNING run directly (start() would also fire a detached
-    // runner that races this explicit runAnalysis in tests).
+    // Se crea el run RUNNING directamente (start() también dispararía un runner
+    // desacoplado que competiría con este runAnalysis explícito en los tests).
     const run = await prisma.analysisRun.create({
       data: { status: "RUNNING", lockToken: "single" },
     });
@@ -178,7 +178,7 @@ describe("runAnalysis pipeline", () => {
     expect(byMeter.get("M-PZ4")!.severity).toBe("HIGH");
     expect(byMeter.get("M-PZ4")!.relatedEvent?.eventType).toBe("DATA_QUALITY");
 
-    // Spanish explanation persisted for every confirmed anomaly.
+    // Explicación en español persistida para cada anomalía confirmada.
     for (const anomaly of anomalies) {
       expect(anomaly.reason).toContain("anómalo");
       expect(anomaly.recommendedAction).toContain("medidor");
@@ -231,9 +231,9 @@ describe("runAnalysis pipeline", () => {
   });
 
   test("borderline |z| in [2.5, 3) routes to the LLM classifier (synthetic fixture)", async () => {
-    // A persistent step whose readings land in the borderline band: baseline
-    // mean 100 with std 8 (alternating 108/92), then a +22% step to ~122
-    // → maxZ ≈ 2.75 ∈ [2.5, 3). No covering event → classify via LLM.
+    // Un paso persistente cuyas lecturas caen en la banda límite: media de
+    // baseline 100 con std 8 (108/92 alternados), luego un paso de +22% a ~122
+    // → maxZ ≈ 2.75 ∈ [2.5, 3). Sin evento de cobertura → clasifica vía LLM.
     const meter = await prisma.meter.create({
       data: { meterId: "M-PZ5", name: "Pipeline Borderline", location: "Site 85" },
     });
@@ -255,7 +255,7 @@ describe("runAnalysis pipeline", () => {
     }
     await prisma.reading.createMany({ data: readings });
 
-    // Fake LLM records classify calls and returns a distinct classification.
+    // El LLM falso registra las llamadas a classify y devuelve una clasificación distinta.
     let classifyCalls = 0;
     const llm = createFakeLlm({
       async classify() {
@@ -282,7 +282,7 @@ describe("runAnalysis pipeline", () => {
     expect(classifyCalls).toBe(1);
     const anomaly = await prisma.anomaly.findFirst({ where: { analysisRunId: run.id } });
     expect(anomaly).not.toBeNull();
-    // The LLM decided the classification (distinct from the rule-based default).
+    // El LLM decidió la clasificación (distinta del default basado en reglas).
     expect(anomaly!.type).toBe("EXPLAINABLE_ANOMALY");
     expect(anomaly!.severity).toBe("MEDIUM");
     expect(anomaly!.reason).toContain("Caso límite");
