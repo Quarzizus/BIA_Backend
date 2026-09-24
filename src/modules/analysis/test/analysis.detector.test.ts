@@ -191,6 +191,10 @@ describe("detectMeter — DATA_QUALITY", () => {
     // Razón de std de voltaje ≈ 10 / 0.5 > 5x.
     expect(dq!.extras!.voltage_sd_ratio).toBeGreaterThan(5);
     expect(dq!.extras!.power_factor_sd_ratio).toBeGreaterThan(5);
+    // Variación real del día vs baseline: consumo estable → ≈0 (antes la razón
+    // media/mu ≈100, que no era una variación).
+    expect(dq!.variationPct).not.toBeNull();
+    expect(dq!.variationPct!).toBeCloseTo(0, 1);
   });
 
   test("voltage noise within 5x baseline does not trigger DQ", () => {

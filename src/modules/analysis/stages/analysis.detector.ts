@@ -1,4 +1,4 @@
-import { mean, populationStd } from "../../../shared/domain/baseline";
+import { mean, populationStd, variationPct } from "../../../shared/domain/baseline";
 import { DAY_MS, HOUR_MS } from "../../../shared/domain/time";
 import {
   DQ_CONSUMPTION_TOLERANCE,
@@ -92,7 +92,7 @@ function detectSpikes(readings: ReadingPoint[], baseline: MeterBaseline): Detect
       const spikeReading = run.reduce((max, r) =>
         Math.abs(r.consumptionKwh - mu) > Math.abs(max.consumptionKwh - mu) ? r : max,
       );
-      const variationPct = mu !== 0 ? ((spikeReading.consumptionKwh - mu) / mu) * 100 : null;
+      const variation = variationPct(spikeReading.consumptionKwh, mu);
       const variables = ["consumption_kwh", "current_a", "power_factor"].filter((signal) => {
         const stats = baseline[signal as Signal];
         if (stats.mean === null || stats.std === null || stats.std === 0) return false;
@@ -106,7 +106,7 @@ function detectSpikes(readings: ReadingPoint[], baseline: MeterBaseline): Detect
         rangeEnd: run[run.length - 1]!.timestamp,
         variables,
         maxZ,
-        variationPct,
+        variationPct: variation,
       });
     }
     run = [];
@@ -220,8 +220,7 @@ function detectPersistentChange(readings: ReadingPoint[], baseline: MeterBaselin
     },
   );
 
-  const changeDeviation = deviation(blockMean(changeStartKey));
-  const variationPct = changeDeviation !== null ? changeDeviation * 100 : null;
+  const variation = variationPct(blockMean(changeStartKey), mu);
   const maxZ = Math.max(
     ...readings
       .filter((r) => r.timestamp.getTime() >= changeStart.getTime())
@@ -235,7 +234,7 @@ function detectPersistentChange(readings: ReadingPoint[], baseline: MeterBaselin
       rangeEnd: changeEnd,
       variables,
       maxZ: Number.isFinite(maxZ) ? maxZ : null,
-      variationPct,
+      variationPct: variation,
     },
   ];
 }
@@ -277,8 +276,9 @@ function detectDataQuality(readings: ReadingPoint[], baseline: MeterBaseline): D
   const maxVoltageRatio = Math.max(...dqDays.map((d) => d.voltageRatio));
   const maxPfRatio = Math.max(...dqDays.map((d) => d.pfRatio));
 
-  // Razón media-del-día sobre media-del-baseline (≈100 para consumo estable). El
-  // bucket nunca está vacío, pero se conserva el fallback null-safe del original.
+  // Variación real del día vs baseline (≈0 para consumo estable; la razón
+  // media/mu ≈100 anterior no era una variación). El bucket nunca está vacío,
+  // pero variationPct es null-safe de todas formas.
   const dayMean = mean(signalValues("consumption_kwh", startBucket));
 
   return [
@@ -288,7 +288,7 @@ function detectDataQuality(readings: ReadingPoint[], baseline: MeterBaseline): D
       rangeEnd: endBucket[endBucket.length - 1]!.timestamp,
       variables: ["voltage_v", "power_factor"],
       maxZ: null,
-      variationPct: mu !== 0 ? ((dayMean ?? 0) / mu) * 100 : null,
+      variationPct: variationPct(dayMean, mu),
       extras: { voltage_sd_ratio: maxVoltageRatio, power_factor_sd_ratio: maxPfRatio },
     },
   ];
