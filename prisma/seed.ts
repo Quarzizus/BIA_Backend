@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import type { EventType } from "../src/generated/prisma/enums";
+import { createAuth } from "../src/config/auth";
 
 const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) {
@@ -119,9 +120,42 @@ function readSeedCsv<T>(fileName: string): T[] {
 }
 
 /**
+ * Credenciales del usuario admin sembrado para la demo (ver README).
+ * `ADMIN_PASSWORD` y `ADMIN_EMAIL` vienen del entorno; si faltan se usan los
+ * defaults documentados. El password NO se imprime en los logs del seed.
+ */
+export const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? "admin@example.com";
+export const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "Admin123!";
+
+/**
+ * Crea el usuario admin (idempotente) usando el flujo de sign-up de
+ * better-auth: se reutiliza su hashing de password (scrypt) y la fila de
+ * `account` con provider "credential", de modo que `/api/auth/sign-in/email`
+ * acepta estas credenciales sin pasos extra.
+ */
+export async function seedAdminUser(prisma: PrismaClient): Promise<void> {
+  const auth = createAuth(prisma);
+  const existing = await prisma.user.findUnique({ where: { email: ADMIN_EMAIL } });
+  if (existing) {
+    console.log(`seed: admin user ${ADMIN_EMAIL} already present — skipping`);
+    return;
+  }
+  const result = await auth.api.signUpEmail({
+    body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD, name: "Administrador" },
+  });
+  if (!result.token) {
+    throw new Error("seed: failed to create admin user (sign-up returned no token)");
+  }
+  console.log(
+    `seed: admin user created (${ADMIN_EMAIL}) — password via ADMIN_PASSWORD env or documented default`,
+  );
+}
+
+/**
  * Seed determinista e idempotente. Cuando los conteos ya coinciden con el
  * dataset (12 meters / 4032 readings / 4 events) omite; si no, borra y recrea
- * los datos dentro de una sola transacción.
+ * los datos dentro de una sola transacción. El usuario admin se asegura en
+ * ambos caminos (dataset presente o recién insertado).
  */
 export async function seed(): Promise<void> {
   const readings = readSeedCsv<ReadingCsvRow>("readings.csv");
@@ -159,64 +193,67 @@ export async function seed(): Promise<void> {
     console.log(
       `seed: data already present (${meterCount} meters, ${readingCount} readings, ${eventCount} events) — skipping`,
     );
-    return;
+  } else {
+    await prisma.$transaction(async (tx) => {
+      await tx.analysisRun.deleteMany();
+      await tx.anomaly.deleteMany();
+      await tx.event.deleteMany();
+      await tx.reading.deleteMany();
+      await tx.meter.deleteMany();
+
+      await tx.meter.createMany({
+        data: meterIds.map((meterId, index) => ({
+          meterId,
+          name: `Meter ${meterId}`,
+          location: `Site ${String(index + 1).padStart(2, "0")}`,
+        })),
+      });
+
+      const meters = await tx.meter.findMany();
+      const meterIdByCode = new Map(meters.map((meter) => [meter.meterId, meter.id]));
+
+      await tx.reading.createMany({
+        data: readings.map((reading) => ({
+          meterId: meterIdByCode.get(reading.meter_id)!,
+          timestamp: normalizeTimestampToUtc(reading.timestamp),
+          consumptionKwh: parseNumericCsvField(reading.consumption_kwh, "consumption_kwh", {
+            meterId: reading.meter_id,
+            timestamp: reading.timestamp,
+          }),
+          voltageV: parseNumericCsvField(reading.voltage_v, "voltage_v", {
+            meterId: reading.meter_id,
+            timestamp: reading.timestamp,
+          }),
+          currentA: parseNumericCsvField(reading.current_a, "current_a", {
+            meterId: reading.meter_id,
+            timestamp: reading.timestamp,
+          }),
+          powerFactor: parseNumericCsvField(reading.power_factor, "power_factor", {
+            meterId: reading.meter_id,
+            timestamp: reading.timestamp,
+          }),
+          status: reading.status,
+        })),
+      });
+
+      await tx.event.createMany({
+        data: events.map((event) => ({
+          meterId: meterIdByCode.get(event.meter_id)!,
+          eventTimestamp: normalizeTimestampToUtc(event.event_timestamp),
+          eventType: event.event_type as EventType,
+          description: event.description,
+        })),
+      });
+    });
+
+    console.log(
+      `seed: inserted ${meterIds.length} meters, ${readings.length} readings, ${events.length} events`,
+    );
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.analysisRun.deleteMany();
-    await tx.anomaly.deleteMany();
-    await tx.event.deleteMany();
-    await tx.reading.deleteMany();
-    await tx.meter.deleteMany();
-
-    await tx.meter.createMany({
-      data: meterIds.map((meterId, index) => ({
-        meterId,
-        name: `Meter ${meterId}`,
-        location: `Site ${String(index + 1).padStart(2, "0")}`,
-      })),
-    });
-
-    const meters = await tx.meter.findMany();
-    const meterIdByCode = new Map(meters.map((meter) => [meter.meterId, meter.id]));
-
-    await tx.reading.createMany({
-      data: readings.map((reading) => ({
-        meterId: meterIdByCode.get(reading.meter_id)!,
-        timestamp: normalizeTimestampToUtc(reading.timestamp),
-        consumptionKwh: parseNumericCsvField(reading.consumption_kwh, "consumption_kwh", {
-          meterId: reading.meter_id,
-          timestamp: reading.timestamp,
-        }),
-        voltageV: parseNumericCsvField(reading.voltage_v, "voltage_v", {
-          meterId: reading.meter_id,
-          timestamp: reading.timestamp,
-        }),
-        currentA: parseNumericCsvField(reading.current_a, "current_a", {
-          meterId: reading.meter_id,
-          timestamp: reading.timestamp,
-        }),
-        powerFactor: parseNumericCsvField(reading.power_factor, "power_factor", {
-          meterId: reading.meter_id,
-          timestamp: reading.timestamp,
-        }),
-        status: reading.status,
-      })),
-    });
-
-    await tx.event.createMany({
-      data: events.map((event) => ({
-        meterId: meterIdByCode.get(event.meter_id)!,
-        eventTimestamp: normalizeTimestampToUtc(event.event_timestamp),
-        eventType: event.event_type as EventType,
-        description: event.description,
-      })),
-    });
-  });
-
-  console.log(
-    `seed: inserted ${meterIds.length} meters, ${readings.length} readings, ${events.length} events`,
-  );
+  // Usuario admin para la demo (autenticación por cookie, Opción A) — en ambos
+  // caminos: dataset presente o recién insertado.
+  await seedAdminUser(prisma);
 }
 
 if (import.meta.main) {

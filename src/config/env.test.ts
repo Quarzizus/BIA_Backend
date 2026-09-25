@@ -6,6 +6,8 @@ const valid = {
   AI_API_KEY: "sk-test",
   AI_BASE_URL: "https://api.example.com/v1",
   AI_MODEL: "gpt-4o",
+  BETTER_AUTH_SECRET: "test-secret-bia-backend-auth-0123456789",
+  BETTER_AUTH_URL: "http://localhost:3000",
   PORT: "3000",
 };
 
@@ -17,11 +19,17 @@ describe("parseEnv", () => {
     expect(result.env.DATABASE_URL).toBe(valid.DATABASE_URL);
     expect(result.env.AI_API_KEY).toBe("sk-test");
     expect(result.env.AI_MODEL).toBe("gpt-4o");
+    expect(result.env.BETTER_AUTH_SECRET).toBe(valid.BETTER_AUTH_SECRET);
+    expect(result.env.BETTER_AUTH_URL).toBe("http://localhost:3000");
     expect(result.env.PORT).toBe(3000);
   });
 
   test("accepts missing AI vars as empty strings (analysis-time check, not startup)", () => {
-    const result = parseEnv({ DATABASE_URL: valid.DATABASE_URL });
+    const result = parseEnv({
+      DATABASE_URL: valid.DATABASE_URL,
+      BETTER_AUTH_SECRET: valid.BETTER_AUTH_SECRET,
+      BETTER_AUTH_URL: valid.BETTER_AUTH_URL,
+    });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.env.AI_API_KEY).toBe("");
@@ -34,6 +42,13 @@ describe("parseEnv", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.issues.join(" ")).toContain("DATABASE_URL");
+  });
+
+  test("reports a clear issue when BETTER_AUTH_SECRET is missing", () => {
+    const result = parseEnv({ DATABASE_URL: valid.DATABASE_URL, BETTER_AUTH_URL: valid.BETTER_AUTH_URL });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues.join(" ")).toContain("BETTER_AUTH_SECRET");
   });
 
   test("reports an issue for non-numeric PORT", () => {

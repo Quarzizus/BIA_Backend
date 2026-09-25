@@ -11,6 +11,13 @@ info:
 
     Todas las fechas son ISO 8601 en UTC. Los errores usan un envelope uniforme:
     `{"error": {"code": "...", "message": "..."}}`.
+
+    **Autenticación**: las rutas de negocio (`/meters`, `/anomalies`,
+    `/dashboard`, `/ai/*`) requieren una sesión por cookie httpOnly emitida por
+    better-auth (sin Bearer: el cliente envía la cookie automáticamente).
+    Son públicas `/`, `/docs`, `/openapi.yaml` y `/api/auth/*`. Sin sesión
+    válida la API responde `401 UNAUTHORIZED`. Credenciales de la demo:
+    `admin@example.com` / `Admin123!` (ver README).
 servers:
   - url: http://localhost:3000
     description: Entorno local (docker compose)
@@ -18,6 +25,8 @@ servers:
 tags:
   - name: Sistema
     description: Salud del servicio
+  - name: Autenticación
+    description: Sesión por cookie httpOnly (better-auth)
   - name: Medidores
     description: Catálogo de medidores, detalle y lecturas
   - name: Anomalías
@@ -28,6 +37,128 @@ tags:
     description: Pipeline de análisis asíncrono con IA
 
 paths:
+  /api/auth/sign-in/email:
+    post:
+      tags: [Autenticación]
+      summary: Inicia sesión con email y password
+      description: |
+        Valida las credenciales y responde con el token de sesión y el usuario.
+        También fija la cookie httpOnly `better-auth.session_token` (el frontend
+        no almacena tokens: la cookie viaja sola en cada request). Sin sesión
+        previa no hace falta nada más para llamar a las rutas de negocio.
+        Credenciales sembradas: `admin@example.com` / `Admin123!`.
+      operationId: signInEmail
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+      responses:
+        "200":
+          description: Sesión iniciada (token + usuario; cookie fijada en la respuesta)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    description: Token de sesión (el cliente lo ignora; la cookie viaja sola)
+                  user:
+                    type: object
+                    required: [id, email, name]
+                    properties:
+                      id:
+                        type: string
+                      email:
+                        type: string
+                      name:
+                        type: string
+                      emailVerified:
+                        type: boolean
+                      image:
+                        type: [string, "null"]
+                  redirect:
+                    type: boolean
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/auth/sign-out:
+    post:
+      tags: [Autenticación]
+      summary: Cierra la sesión actual
+      description: |
+        Invalida la sesión en el servidor y borra la cookie. Las llamadas
+        posteriores con la cookie antigua reciben `401 UNAUTHORIZED`.
+      operationId: signOut
+      responses:
+        "200":
+          description: Sesión cerrada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+
+  /api/auth/get-session:
+    get:
+      tags: [Autenticación]
+      summary: Devuelve la sesión y el usuario autenticado
+      description: |
+        Con cookie válida responde `{session, user}`; sin cookie (o sesión
+        expirada/inválida) responde `200` con body `null` (contrato de
+        better-auth). Útil para el arranque del frontend: si responde `null`,
+        redirige al login.
+      operationId: getSession
+      responses:
+        "200":
+          description: |
+            Sesión activa con el usuario autenticado (`{session, user}`) o
+            `null` si no hay sesión válida
+          content:
+            application/json:
+              schema:
+                type: [object, "null"]
+                properties:
+                  session:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      userId:
+                        type: string
+                      expiresAt:
+                        type: string
+                        format: date-time
+                      token:
+                        type: string
+                  user:
+                    type: object
+                    required: [id, email, name]
+                    properties:
+                      id:
+                        type: string
+                      email:
+                        type: string
+                      name:
+                        type: string
+                      emailVerified:
+                        type: boolean
+                      image:
+                        type: [string, "null"]
+
   /:
     get:
       tags: [Sistema]
@@ -61,6 +192,8 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/MeterSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -84,6 +217,8 @@ paths:
                 $ref: "#/components/schemas/MeterDetail"
         "400":
           $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -114,6 +249,8 @@ paths:
                 $ref: "#/components/schemas/ReadingsListResponse"
         "400":
           $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -147,6 +284,8 @@ paths:
                 $ref: "#/components/schemas/AnomalyListResponse"
         "400":
           $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -170,6 +309,8 @@ paths:
                 $ref: "#/components/schemas/AnomalyDetail"
         "400":
           $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -201,6 +342,8 @@ paths:
                 $ref: "#/components/schemas/AnomalyDetail"
         "400":
           $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -231,6 +374,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DashboardSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -259,6 +404,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AnalysisAccepted"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: El medidor indicado en `meter_id` no existe
           content:
@@ -316,6 +463,8 @@ paths:
                 $ref: "#/components/schemas/AnalysisRunStatus"
         "400":
           $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -462,6 +611,20 @@ components:
             error:
               code: NOT_FOUND
               message: Resource not found
+    Unauthorized:
+      description: |
+        No autenticado: falta la cookie de sesión httpOnly o la sesión es
+        inválida/expirada. En `/api/auth/*` better-auth responde su propio
+        envelope `{message, code}`; en las rutas de negocio el envelope es
+        `{error: {code, message}}`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: UNAUTHORIZED
+              message: Authentication required
     InternalError:
       description: Error interno no manejado
       content:
@@ -486,9 +649,10 @@ components:
             code:
               type: string
               description: |
-                Código del error: `VALIDATION_ERROR`, `NOT_FOUND`,
-                `ANALYSIS_IN_PROGRESS`, `INVALID_STATUS_TRANSITION`,
-                `AI_NOT_CONFIGURED` o `INTERNAL_ERROR`.
+                Código del error: `UNAUTHORIZED` (sesión requerida),
+                `VALIDATION_ERROR`, `NOT_FOUND`, `ANALYSIS_IN_PROGRESS`,
+                `INVALID_STATUS_TRANSITION`, `AI_NOT_CONFIGURED` o
+                `INTERNAL_ERROR`.
             message:
               type: string
               description: Descripción legible del error

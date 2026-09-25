@@ -6,6 +6,7 @@ import {
   provisionTestDb,
   seedTestDb,
 } from "../../../testing/testDb";
+import { ensureAdminUser, signInAndGetCookie } from "../../../testing/authTestHelper";
 
 const prisma = createTestPrisma("bia_test_analysis");
 
@@ -49,13 +50,14 @@ const VALID_ENV = {
 
 let baseUrl: string;
 let server: import("node:http").Server;
+let cookie: string;
 const CLEAN_METERS = ["M-101", "M-102", "M-103", "M-105", "M-107", "M-108", "M-110", "M-111"];
 const GROUND_TRUTH_METERS = ["M-109", "M-104", "M-106", "M-112"];
 
 async function waitForCompletion(runId: string, timeoutMs = 15000): Promise<Record<string, any>> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const res = await fetch(`${baseUrl}/ai/analysis/${runId}`);
+    const res = await fetch(`${baseUrl}/ai/analysis/${runId}`, { headers: { cookie } });
     const body = (await res.json()) as Record<string, any>;
     if (body.status === "COMPLETED" || body.status === "FAILED") return body;
     await new Promise((r) => setTimeout(r, 100));
@@ -76,6 +78,9 @@ beforeAll(async () => {
   server = app.listen(0);
   await new Promise<void>((resolve) => server.once("listening", resolve));
   baseUrl = `http://localhost:${(server.address() as { port: number }).port}`;
+  // Opción A: el pipeline de análisis está protegido — sesión admin para todo el archivo.
+  await ensureAdminUser(prisma);
+  cookie = await signInAndGetCookie(baseUrl);
 });
 
 afterAll(async () => {
@@ -85,7 +90,7 @@ afterAll(async () => {
 
 describe("E2E pipeline on real seeded data (spec analysis-pipeline)", () => {
   test("POST /ai/analyze → 202; run completes with the 4 ground-truth anomalies", async () => {
-    const res = await fetch(`${baseUrl}/ai/analyze`, { method: "POST" });
+    const res = await fetch(`${baseUrl}/ai/analyze`, { method: "POST", headers: { cookie } });
     expect(res.status).toBe(202);
     const { analysis_id } = (await res.json()) as { analysis_id: string };
 
@@ -197,7 +202,7 @@ describe("E2E pipeline on real seeded data (spec analysis-pipeline)", () => {
   });
 
   test("GET /anomalies exposes the 4 anomalies through the API (spec anomalies-api)", async () => {
-    const res = await fetch(`${baseUrl}/anomalies`);
+    const res = await fetch(`${baseUrl}/anomalies`, { headers: { cookie } });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { items: Array<Record<string, any>> };
     const real = body.items.find((a) => a.meter_id === "M-109");
@@ -212,12 +217,12 @@ describe("E2E pipeline on real seeded data (spec analysis-pipeline)", () => {
   });
 
   test("GET /anomalies/:id exposes the 4 explanations (toggle simple/técnica)", async () => {
-    const res = await fetch(`${baseUrl}/anomalies`);
+    const res = await fetch(`${baseUrl}/anomalies`, { headers: { cookie } });
     const body = (await res.json()) as { items: Array<Record<string, any>> };
     const real = body.items.find((a) => a.meter_id === "M-109");
     expect(real).toBeDefined();
 
-    const detailRes = await fetch(`${baseUrl}/anomalies/${real!.id}`);
+    const detailRes = await fetch(`${baseUrl}/anomalies/${real!.id}`, { headers: { cookie } });
     expect(detailRes.status).toBe(200);
     const detail = (await detailRes.json()) as Record<string, any>;
     expect(detail.reason).toContain("anómalo");
@@ -230,7 +235,7 @@ describe("E2E pipeline on real seeded data (spec analysis-pipeline)", () => {
   });
 
   test("dashboard summary reflects the recomputed meter statuses (spec dashboard)", async () => {
-    const res = await fetch(`${baseUrl}/dashboard/summary`);
+    const res = await fetch(`${baseUrl}/dashboard/summary`, { headers: { cookie } });
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, any>;
     // Cotas inferiores (no exactas): analysis.service.test.ts comparte la base
@@ -248,7 +253,7 @@ describe("E2E pipeline on real seeded data (spec analysis-pipeline)", () => {
       data: { status: "RUNNING", lockToken: "single" },
     });
     try {
-      const res = await fetch(`${baseUrl}/ai/analyze`, { method: "POST" });
+      const res = await fetch(`${baseUrl}/ai/analyze`, { method: "POST", headers: { cookie } });
       expect(res.status).toBe(409);
       const body = (await res.json()) as Record<string, any>;
       expect(body.error.code).toBe("ANALYSIS_IN_PROGRESS");
@@ -270,7 +275,9 @@ describe("E2E pipeline on real seeded data (spec analysis-pipeline)", () => {
     await new Promise<void>((resolve) => isolated.once("listening", resolve));
     const url = `http://localhost:${(isolated.address() as { port: number }).port}`;
     try {
-      const res = await fetch(`${url}/ai/analyze`, { method: "POST" });
+      // La cookie del servidor principal es válida aquí: misma base y mismo
+      // secreto por proceso → misma sesión en la tabla `session`.
+      const res = await fetch(`${url}/ai/analyze`, { method: "POST", headers: { cookie } });
       expect(res.status).toBe(503);
       const body = (await res.json()) as Record<string, any>;
       expect(body.error.code).toBe("AI_NOT_CONFIGURED");

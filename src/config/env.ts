@@ -9,6 +9,11 @@ const envSchema = z.object({
   AI_API_KEY: z.string().default(""),
   AI_BASE_URL: z.string().default(""),
   AI_MODEL: z.string().default(""),
+  // Mejor práctica de better-auth: el secreto se pasa como variable de entorno
+  // y nunca se versiona. Sin él la app arranca con advertencia, pero en
+  // producción es obligatorio (>= 32 caracteres).
+  BETTER_AUTH_SECRET: z.string().min(1, "BETTER_AUTH_SECRET is required"),
+  BETTER_AUTH_URL: z.string().min(1, "BETTER_AUTH_URL is required"),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
 });
 

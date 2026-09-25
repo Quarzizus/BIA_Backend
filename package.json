@@ -26,6 +26,7 @@
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "@scalar/express-api-reference": "^0.10.22",
+    "better-auth": "^1.7.6",
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "prisma": "^7.10.0",
