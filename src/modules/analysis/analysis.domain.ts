@@ -108,7 +108,9 @@ export const EVENT_MAPPING: Record<EventType, { type: AnomalyType; severity: Sev
 /**
  * Fallback por reglas cuando el proveedor de IA no está disponible: explicación
  * en español que cita la evidencia concreta de la detección. Null-safe (maxZ o
- * variación n/d). El texto "por reglas" marca el origen del fallback.
+ * variación n/d). Sigue el mismo contrato de formato que el LLM: párrafo 1 con
+ * la evidencia y párrafo 2 con el origen del fallback, separados por línea en
+ * blanco. El texto "por reglas" marca el origen del fallback.
  */
 export function FALLBACK_REASON(
   type: AnomalyType,
@@ -118,13 +120,16 @@ export function FALLBACK_REASON(
 ): string {
   const z = maxZ !== null ? String(maxZ) : "n/d";
   const variation = variationPct !== null ? String(variationPct) : "n/d";
-  return `Anomalía ${type} (${detectionType}, max |z| ${z}, variación ${variation}%). El proveedor de IA no estuvo disponible; explicación generada por reglas.`;
+  return `Anomalía ${type} (${detectionType}, max |z| ${z}, variación ${variation}%).\n\nEl proveedor de IA no estuvo disponible; explicación generada por reglas.`;
 }
 
-/** Acción recomendada por reglas, una por tipo de anomalía (fallback del LLM). */
+/** Acción recomendada por reglas, una por tipo de anomalía (fallback del LLM): lista markdown de 2 items. */
 export const FALLBACK_ACTION: Record<AnomalyType, string> = {
-  REAL_ANOMALY: "Inspeccionar el medidor y verificar la causa del consumo anómalo.",
-  EXPLAINABLE_ANOMALY: "Verificar que el cambio operativo explique la magnitud observada.",
-  FALSE_POSITIVE: "La señal coincide con un evento programado; no requiere acción.",
-  DATA_QUALITY: "Verificar la integridad de la medición (sensores y registro).",
+  REAL_ANOMALY: "- Inspeccionar el medidor y sus conexiones.\n- Verificar la carga conectada al circuito.",
+  EXPLAINABLE_ANOMALY:
+    "- Verificar que el cambio operativo explique la magnitud observada.\n- Monitorear el consumo durante las próximas 48 horas.",
+  FALSE_POSITIVE:
+    "- Confirmar que la señal coincide con el evento programado.\n- No se requiere acción adicional si se confirma.",
+  DATA_QUALITY:
+    "- Verificar la integridad de la medición (sensores y registro).\n- Recalibrar o reemplazar el sensor si persiste la inconsistencia.",
 };

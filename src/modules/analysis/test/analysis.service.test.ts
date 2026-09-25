@@ -213,10 +213,14 @@ describe("runAnalysis pipeline", () => {
       include: { meter: true },
     });
     expect(anomalies).toHaveLength(4);
-    // Cada anomalía conserva su clasificación determinista con explicación por reglas.
+    // Cada anomalía conserva su clasificación determinista con explicación por reglas
+    // siguiendo el mismo contrato de formato que el LLM: reason en 2 párrafos
+    // separados por línea en blanco y recommended_action con bullets "- ".
     for (const anomaly of anomalies) {
       expect(anomaly.reason).toContain("por reglas");
       expect(anomaly.reason).toContain(anomaly.type);
+      expect(anomaly.reason).toContain("\n\n");
+      expect(anomaly.recommendedAction!.startsWith("- ")).toBe(true);
       expect(anomaly.recommendedAction!.length).toBeGreaterThan(0);
     }
   });

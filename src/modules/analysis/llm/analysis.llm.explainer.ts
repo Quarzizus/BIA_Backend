@@ -53,6 +53,8 @@ export function buildExplainPrompt(
       role: "user",
       content: [
         "Explica la siguiente anomalía confirmada: genera reason (por qué es una anomalía) y recommended_action (acción recomendada) en español.",
+        'Formato de reason: 2-3 párrafos cortos separados por una línea en blanco ("\\n\\n"), cada párrafo de 1-3 frases.',
+        'Formato de recommended_action: lista markdown de 2-4 items, cada uno con prefijo "- " y una sola frase imperativa.',
         "Datos del caso:",
         JSON.stringify(anomaly, null, 2),
         ...(evidenceLines.length > 0

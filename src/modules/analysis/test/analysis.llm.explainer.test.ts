@@ -35,6 +35,17 @@ describe("buildExplainPrompt", () => {
     expect(messages[1]!.content).toContain('"max_z": 8.79');
   });
 
+  test("instructs the explanation format (paragraphs + markdown bullets) in system and user messages", () => {
+    const messages = buildExplainPrompt(anomaly);
+    // Sistema: contrato de formato para reason/recommended_action.
+    expect(messages[0]!.content).toContain("párrafos");
+    expect(messages[0]!.content).toContain("- ");
+    // Prompt del usuario: los mismos requisitos embebidos explícitamente.
+    expect(messages[1]!.content).toContain("párrafos");
+    expect(messages[1]!.content).toContain('"- "');
+    expect(messages[1]!.content).toContain("markdown");
+  });
+
   test("embeds readable per-variable evidence lines (baseline → reciente)", () => {
     const messages = buildExplainPrompt(anomaly);
     expect(messages[1]!.content).toContain("Evidencia por variable (baseline → reciente):");
