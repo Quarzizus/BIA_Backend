@@ -27,6 +27,15 @@ export function createDashboardRepository(prisma: PrismaClient): DashboardReposi
       return rows.map((row) => ({ severity: row.severity, count: row._count._all }));
     },
 
+    /** Conteos por severidad de TODAS las anomalías (cualquier estado, incl. RESOLVED). */
+    async severityCounts() {
+      const rows = await prisma.anomaly.groupBy({
+        by: ["severity"],
+        _count: { _all: true },
+      });
+      return rows.map((row) => ({ severity: row.severity, count: row._count._all }));
+    },
+
     async recentAnomalies(limit: number) {
       return prisma.anomaly.findMany({
         take: limit,

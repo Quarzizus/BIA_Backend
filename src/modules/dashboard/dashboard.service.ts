@@ -12,10 +12,11 @@ export function createDashboardService(prisma: PrismaClient): DashboardService {
 
   return {
     async summary(): Promise<DashboardSummary> {
-      const [total, meterStatuses, openBySeverityRows, recent] = await Promise.all([
+      const [total, meterStatuses, openBySeverityRows, severityRows, recent] = await Promise.all([
         repository.totalConsumption(),
         repository.meterStatusCounts(),
         repository.openBySeverityCounts(),
+        repository.severityCounts(),
         repository.recentAnomalies(RECENT_ANOMALIES_LIMIT),
       ]);
 
@@ -24,12 +25,17 @@ export function createDashboardService(prisma: PrismaClient): DashboardService {
       for (const row of openBySeverityRows) {
         openBySeverity[row.severity] = row.count;
       }
+      const severityCounts = { HIGH: 0, MEDIUM: 0, LOW: 0 };
+      for (const row of severityRows) {
+        severityCounts[row.severity] = row.count;
+      }
 
       return {
         total_consumption: total ?? 0,
         meters_alert: countByStatus.get("ALERT") ?? 0,
         meters_critical: countByStatus.get("CRITICAL") ?? 0,
         open_by_severity: openBySeverity,
+        severity_counts: severityCounts,
         recent_anomalies: recent.map((anomaly) => ({
           id: anomaly.id,
           meter_id: anomalyMeterCode(anomaly),

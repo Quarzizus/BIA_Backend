@@ -117,6 +117,14 @@ describe("GET /dashboard/summary", () => {
     expect(body.open_by_severity.LOW).toBe(0);
   });
 
+  test("severity_counts incluye TODAS las anomalías, también RESOLVED (donut/KPI server-exacto)", async () => {
+    const body = (await (await fetch(`${server.baseUrl}/dashboard/summary`)).json()) as Record<string, any>;
+    // Fixture: HIGH OPEN + HIGH RESOLVED + MEDIUM OPEN + LOW RESOLVED → {2, 1, 1}.
+    expect(body.severity_counts.HIGH).toBe(2);
+    expect(body.severity_counts.MEDIUM).toBe(1);
+    expect(body.severity_counts.LOW).toBe(1);
+  });
+
   test("recent_anomalies includes the open critical anomaly with full fields", async () => {
     const body = (await (await fetch(`${server.baseUrl}/dashboard/summary`)).json()) as Record<string, any>;
     const mine = (body.recent_anomalies as any[]).find(

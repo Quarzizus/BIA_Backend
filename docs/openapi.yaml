@@ -904,6 +904,7 @@ components:
         - meters_alert
         - meters_critical
         - open_by_severity
+        - severity_counts
         - recent_anomalies
       properties:
         total_consumption:
@@ -917,6 +918,9 @@ components:
           description: Medidores en estado CRITICAL
         open_by_severity:
           $ref: "#/components/schemas/OpenBySeverity"
+        severity_counts:
+          $ref: "#/components/schemas/OpenBySeverity"
+          description: Conteos por severidad de TODAS las anomalías (cualquier estado, incl. RESOLVED) — agregación server-exacta para el donut y KPIs del dashboard
         recent_anomalies:
           type: array
           description: Anomalías abiertas más recientes (máx. 5)
