@@ -4,6 +4,7 @@ import { ApiError } from "../../shared/errors";
 import { anomalyMeterCode } from "../../shared/domain/anomaly";
 import { createAnomalyRepository } from "./anomaly.repository";
 import { canTransition } from "./anomaly.transition";
+import { computeAnomalyPriority } from "./anomaly.domain";
 import type {
   AnomalyDetail,
   AnomalyFilters,
@@ -12,7 +13,7 @@ import type {
   AnomalyService,
 } from "./anomaly.domain";
 
-function toListItem(anomaly: AnomalyRow): AnomalyListItem {
+function toListItem(anomaly: AnomalyRow, now: Date): AnomalyListItem {
   return {
     id: anomaly.id,
     meter_id: anomalyMeterCode(anomaly),
@@ -23,7 +24,24 @@ function toListItem(anomaly: AnomalyRow): AnomalyListItem {
     recommended_action: anomaly.recommendedAction,
     recommended_action_simple: anomaly.recommendedActionSimple,
     detected_at: anomaly.detectedAt.toISOString(),
+    priority: computeAnomalyPriority({
+      severity: anomaly.severity,
+      type: anomaly.type,
+      detectedAt: anomaly.detectedAt,
+      signals: anomaly.signals,
+      now,
+    }),
   };
+}
+
+/** Ordena la lista según el filtro `sort` (por defecto: prioridad descendente). */
+function sortItems(items: AnomalyListItem[], sort: "priority" | "detected_at" | undefined): void {
+  if (sort === "detected_at") {
+    items.sort((a, b) => b.detected_at.localeCompare(a.detected_at));
+    return;
+  }
+  // Empates en prioridad → detected_at descendente (más reciente primero).
+  items.sort((a, b) => b.priority - a.priority || b.detected_at.localeCompare(a.detected_at));
 }
 
 export function createAnomalyService(prisma: PrismaClient): AnomalyService {
@@ -34,8 +52,10 @@ export function createAnomalyService(prisma: PrismaClient): AnomalyService {
     if (!anomaly) {
       throw new ApiError(404, "NOT_FOUND", `Anomaly ${id} not found`);
     }
+    // Un solo `now` por petición: el score es consistente dentro de la respuesta.
+    const now = new Date();
     return {
-      ...toListItem(anomaly),
+      ...toListItem(anomaly, now),
       range_start: anomaly.rangeStart.toISOString(),
       range_end: anomaly.rangeEnd.toISOString(),
       detection_type: anomaly.detectionType,
@@ -56,8 +76,12 @@ export function createAnomalyService(prisma: PrismaClient): AnomalyService {
 
   return {
     async list(filters: AnomalyFilters): Promise<AnomalyListItem[]> {
-      const anomalies = await repository.list(filters);
-      return anomalies.map(toListItem);
+      // Un solo `now` por petición: todas las filas comparten el mismo instante
+      // de referencia para la recencia.
+      const now = new Date();
+      const items = (await repository.list(filters)).map((anomaly) => toListItem(anomaly, now));
+      sortItems(items, filters.sort);
+      return items;
     },
 
     detail,

@@ -8,6 +8,7 @@ export const anomalyIdParam = z.object({
 export const listQuery = z.object({
   status: z.enum(AnomalyStatus).optional(),
   severity: z.enum(Severity).optional(),
+  sort: z.enum(["priority", "detected_at"]).default("priority"),
 });
 export type ListQuery = z.infer<typeof listQuery>;
 

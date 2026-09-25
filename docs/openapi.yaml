@@ -121,11 +121,16 @@ paths:
     get:
       tags: [Anomalías]
       summary: Lista de anomalías
-      description: Anomalías detectadas, opcionalmente filtradas por estado y severidad.
+      description: |
+        Anomalías detectadas, opcionalmente filtradas por estado y severidad.
+        Orden por defecto: `priority` descendente (score de prioridad calculado
+        por el backend; mayor = más urgente). Con `?sort=detected_at` se obtiene
+        el orden cronológico descendente (orden previo, compatibilidad).
       operationId: listAnomalies
       parameters:
         - $ref: "#/components/parameters/AnomalyStatusFilter"
         - $ref: "#/components/parameters/AnomalySeverityFilter"
+        - $ref: "#/components/parameters/AnomalySortFilter"
       responses:
         "200":
           description: Lista de anomalías
@@ -342,6 +347,17 @@ components:
       description: Filtra por severidad
       schema:
         $ref: "#/components/schemas/Severity"
+    AnomalySortFilter:
+      name: sort
+      in: query
+      required: false
+      description: |
+        Orden de la lista: `priority` (score de prioridad descendente, por
+        defecto) o `detected_at` (cronológico descendente, orden previo).
+      schema:
+        type: string
+        enum: [priority, detected_at]
+        default: priority
 
   responses:
     ValidationError:
@@ -576,6 +592,7 @@ components:
         - recommended_action
         - recommended_action_simple
         - detected_at
+        - priority
       properties:
         id:
           type: string
@@ -611,6 +628,14 @@ components:
         detected_at:
           type: string
           format: date-time
+        priority:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: |
+            Score de prioridad calculado por el backend — mayor = más urgente.
+            Compuesto por severidad/impacto/recencia/tipo; regla transparente y
+            documentada en el código (NO proviene del LLM). Rango 0-100.
 
     VariableEvidence:
       type: object
