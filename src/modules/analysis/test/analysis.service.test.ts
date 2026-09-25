@@ -390,4 +390,134 @@ describe("runAnalysis pipeline", () => {
     await prisma.reading.deleteMany({ where: { meterId: meter.id } });
     await prisma.meter.delete({ where: { id: meter.id } });
   });
+
+  test("a second run REFRESHES the same OPEN anomalies instead of duplicating them", async () => {
+    // Upsert por (meter + type + status=OPEN): el segundo run sobre los mismos
+    // hallazgos debe ACTUALIZAR las 4 filas, no crear 4 nuevas.
+    const run1 = await prisma.analysisRun.create({
+      data: { status: "RUNNING", lockToken: "single" },
+    });
+    createdRunIds.push(run1.id);
+    await service.runAnalysis(run1.id, { meterCodes: FIXTURE_METERS });
+
+    const before = await prisma.anomaly.findMany({
+      where: { meter: { meterId: { in: FIXTURE_METERS } } },
+      include: { meter: true },
+      orderBy: { meter: { meterId: "asc" } },
+    });
+    expect(before).toHaveLength(4);
+    expect(before.every((a) => a.status === "OPEN")).toBe(true);
+    const idsBefore = before.map((a) => a.id);
+
+    // Segundo run con otro LLM: la explicación cambia → prueba que la fila se refrescó.
+    const secondLlm = createFakeLlm({
+      async explain() {
+        return {
+          reason: "Explicación renovada por el segundo análisis.",
+          recommended_action: "Revisar la instalación del medidor.",
+        };
+      },
+    });
+    const secondService = createAnalysisService(prisma, secondLlm, {
+      AI_API_KEY: "test-key",
+      AI_BASE_URL: "https://fake/v1",
+      AI_MODEL: "test",
+    });
+    // Garantiza detectedAt estrictamente mayor que el del primer run.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const run2 = await prisma.analysisRun.create({
+      data: { status: "RUNNING", lockToken: "single" },
+    });
+    createdRunIds.push(run2.id);
+    await secondService.runAnalysis(run2.id, { meterCodes: FIXTURE_METERS });
+
+    const after = await prisma.anomaly.findMany({
+      where: { meter: { meterId: { in: FIXTURE_METERS } } },
+      include: { meter: true },
+      orderBy: { meter: { meterId: "asc" } },
+    });
+    // N runs NO acumulan filas: total se mantiene en 4 (una por medidor).
+    expect(after).toHaveLength(4);
+    expect(after.map((a) => a.id)).toEqual(idsBefore);
+
+    // Cada medidor conserva exactamente UNA anomalía OPEN (misma id, refrescada).
+    const openByMeter = new Map<string, number>();
+    for (const anomaly of after) {
+      expect(anomaly.status).toBe("OPEN");
+      const code = anomaly.meter!.meterId;
+      openByMeter.set(code, (openByMeter.get(code) ?? 0) + 1);
+    }
+    expect(openByMeter.size).toBe(4);
+    for (const count of openByMeter.values()) expect(count).toBe(1);
+
+    // La fila se REFRESCÓ: analysisRunId del run actual, explicación nueva y detectedAt actualizado.
+    const beforeByMeter = new Map(before.map((a) => [a.meter!.meterId, a]));
+    for (const anomaly of after) {
+      expect(anomaly.analysisRunId).toBe(run2.id);
+      expect(anomaly.reason).toBe("Explicación renovada por el segundo análisis.");
+      expect(anomaly.detectedAt.getTime()).toBeGreaterThan(
+        beforeByMeter.get(anomaly.meter!.meterId)!.detectedAt.getTime(),
+      );
+    }
+
+    // countAnomalies(run2) sigue reportando las 4 (creadas o refrescadas por el run).
+    const status2 = await secondService.getStatus(run2.id);
+    expect(status2.anomaly_count).toBe(4);
+  });
+
+  test("a RESOLVED anomaly is history: the next run creates a NEW row for that meter", async () => {
+    // Baseline propio: un run garantiza 4 anomalías OPEN (una por medidor),
+    // independiente del estado que dejen otros tests del archivo.
+    const baselineRun = await prisma.analysisRun.create({
+      data: { status: "RUNNING", lockToken: "single" },
+    });
+    createdRunIds.push(baselineRun.id);
+    await service.runAnalysis(baselineRun.id, { meterCodes: FIXTURE_METERS });
+
+    // Se resuelve M-PZ1 → sale del set OPEN (queda como historial).
+    const mPz1Open = await prisma.anomaly.findFirst({
+      where: { meter: { meterId: "M-PZ1" }, status: "OPEN" },
+    });
+    expect(mPz1Open).not.toBeNull();
+    const resolved = await prisma.anomaly.update({
+      where: { id: mPz1Open!.id },
+      data: { status: "RESOLVED" },
+    });
+
+    const run = await prisma.analysisRun.create({
+      data: { status: "RUNNING", lockToken: "single" },
+    });
+    createdRunIds.push(run.id);
+    await service.runAnalysis(run.id, { meterCodes: FIXTURE_METERS });
+
+    const anomalies = await prisma.anomaly.findMany({
+      where: { meter: { meterId: { in: FIXTURE_METERS } } },
+      include: { meter: true },
+      orderBy: { meter: { meterId: "asc" } },
+    });
+    // 5 filas en total: 4 OPEN (3 refrescadas + 1 nueva de M-PZ1) + la RESOLVED de historial.
+    expect(anomalies).toHaveLength(5);
+    const open = anomalies.filter((a) => a.status === "OPEN");
+    expect(open).toHaveLength(4);
+
+    // M-PZ1: la RESOLVED sigue existiendo y el nuevo run creó una fila NUEVA (otra id).
+    const mPz1Rows = anomalies.filter((a) => a.meter!.meterId === "M-PZ1");
+    expect(mPz1Rows).toHaveLength(2);
+    const resolvedRow = mPz1Rows.find((a) => a.status === "RESOLVED")!;
+    const newOpenRow = mPz1Rows.find((a) => a.status === "OPEN")!;
+    expect(resolvedRow.id).toBe(resolved.id);
+    expect(newOpenRow.id).not.toBe(resolved.id);
+    expect(newOpenRow.analysisRunId).toBe(run.id);
+
+    // Los demás medidores refrescan su misma fila OPEN con el run actual.
+    for (const code of ["M-PZ2", "M-PZ3", "M-PZ4"]) {
+      const rows = anomalies.filter((a) => a.meter!.meterId === code);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.status).toBe("OPEN");
+      expect(rows[0]!.analysisRunId).toBe(run.id);
+    }
+
+    const status = await service.getStatus(run.id);
+    expect(status.anomaly_count).toBe(4);
+  });
 });

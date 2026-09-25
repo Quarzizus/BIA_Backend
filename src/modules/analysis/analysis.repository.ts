@@ -1,4 +1,4 @@
-import type { AnalysisRun, Meter, PrismaClient, Reading } from "../../generated/prisma/client";
+import type { AnalysisRun, Meter, Prisma, PrismaClient, Reading } from "../../generated/prisma/client";
 import type { AnomalyType, Severity } from "../../generated/prisma/enums";
 import { deriveMeterStatus } from "../../shared/domain/meter-status";
 import type { MeterEvent } from "./analysis.domain";
@@ -52,6 +52,22 @@ export interface AnalysisRepository {
   countAnomalies(runId: string): Promise<number>;
 }
 
+/**
+ * Helper del upsert de hallazgos: devuelve la anomalía OPEN del medidor con el
+ * mismo tipo, si existe. Solo las OPEN entran en el set activo — las RESOLVED
+ * son historial y no bloquean la creación de una fila nueva.
+ */
+async function findOpenByMeterAndType(
+  tx: Prisma.TransactionClient,
+  meterId: string,
+  type: AnomalyType,
+): Promise<{ id: string } | null> {
+  return tx.anomaly.findFirst({
+    where: { meterId, type: type as never, status: "OPEN" },
+    select: { id: true },
+  });
+}
+
 export function createAnalysisRepository(prisma: PrismaClient): AnalysisRepository {
   return {
     async createRun() {
@@ -96,23 +112,49 @@ export function createAnalysisRepository(prisma: PrismaClient): AnalysisReposito
     async persistFindings(runId, findings, summary, llmUsed) {
       await prisma.$transaction(async (tx) => {
         for (const finding of findings) {
-          await tx.anomaly.create({
-            data: {
-              meterId: finding.meterId,
-              analysisRunId: runId,
-              relatedEventId: finding.relatedEventId,
-              type: finding.type as never,
-              severity: finding.severity as never,
-              confidence: finding.confidence,
-              reason: finding.reason,
-              recommendedAction: finding.recommendedAction,
-              status: "OPEN",
-              rangeStart: finding.rangeStart,
-              rangeEnd: finding.rangeEnd,
-              detectionType: finding.detectionType,
-              signals: finding.signals,
-            },
-          });
+          // Upsert (decisión de producto): si el medidor ya tiene una anomalía
+          // OPEN del mismo tipo, se REFRESCA en lugar de crear otra fila — N runs
+          // sobre los mismos hallazgos no acumulan N×4 anomalías. El status OPEN
+          // filtra solo: una anomalía RESOLVED queda como historial y el próximo
+          // run crea una fila nueva para ese medidor.
+          const open = await findOpenByMeterAndType(tx, finding.meterId, finding.type);
+          if (open) {
+            await tx.anomaly.update({
+              where: { id: open.id },
+              data: {
+                analysisRunId: runId,
+                relatedEventId: finding.relatedEventId,
+                type: finding.type as never,
+                severity: finding.severity as never,
+                confidence: finding.confidence,
+                reason: finding.reason,
+                recommendedAction: finding.recommendedAction,
+                rangeStart: finding.rangeStart,
+                rangeEnd: finding.rangeEnd,
+                detectionType: finding.detectionType,
+                signals: finding.signals,
+                detectedAt: new Date(),
+              },
+            });
+          } else {
+            await tx.anomaly.create({
+              data: {
+                meterId: finding.meterId,
+                analysisRunId: runId,
+                relatedEventId: finding.relatedEventId,
+                type: finding.type as never,
+                severity: finding.severity as never,
+                confidence: finding.confidence,
+                reason: finding.reason,
+                recommendedAction: finding.recommendedAction,
+                status: "OPEN",
+                rangeStart: finding.rangeStart,
+                rangeEnd: finding.rangeEnd,
+                detectionType: finding.detectionType,
+                signals: finding.signals,
+              },
+            });
+          }
           // D4: el status del medidor refleja la anomalía OPEN más severa de este run.
           const meterStatus = deriveMeterStatus([finding.severity]);
           await tx.meter.update({
