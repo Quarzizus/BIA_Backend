@@ -72,15 +72,19 @@ export interface AnalysisRepository {
     detectionType: string,
     signals: object,
   ): Promise<AnomalyEvidenceCache | null>;
-  /** Persiste hallazgos + status de medidor recalculado + finalización del run, atómicamente. */
+  /**
+   * Persiste hallazgos + status de medidor recalculado + finalización del run,
+   * atómicamente. `explanationSource` es el origen de los textos del run
+   * ("llm" | "llm_cached" | "rules" | null) decidido por el servicio.
+   */
   persistFindings(
     runId: string,
     findings: AnalysisFinding[],
     summary: string,
     llmUsed: boolean,
+    explanationSource: "llm" | "llm_cached" | "rules" | null,
   ): Promise<void>;
   failRun(runId: string, message: string): Promise<void>;
-  countAnomalies(runId: string): Promise<number>;
 }
 
 /** Fila activa (status != RESOLVED) pre-fetchada para el upsert y el recompute de Meter.status. */
@@ -198,7 +202,7 @@ export function createAnalysisRepository(prisma: PrismaClient): AnalysisReposito
       };
     },
 
-    async persistFindings(runId, findings, summary, llmUsed) {
+    async persistFindings(runId, findings, summary, llmUsed, explanationSource) {
       await prisma.$transaction(async (tx) => {
         // F10: UNA consulta pre-fetcha las anomalías ACTIVE (no RESOLVED) de
         // todos los medidores afectados. Sirve para (a) decidir create/update
@@ -317,6 +321,11 @@ export function createAnalysisRepository(prisma: PrismaClient): AnalysisReposito
             completedAt: new Date(),
             lockToken: null,
             llmUsed,
+            // Contadores del contrato de status: nuevas y refrescadas del run.
+            newCount,
+            refreshedCount,
+            // Origen de las explicaciones (null si el run no tuvo hallazgos).
+            explanationSource,
           },
         });
       });
@@ -331,12 +340,12 @@ export function createAnalysisRepository(prisma: PrismaClient): AnalysisReposito
           completedAt: new Date(),
           lockToken: null,
           llmUsed: false,
+          // FAILED: sin hallazgos → origen de explicaciones null.
+          newCount: 0,
+          refreshedCount: 0,
+          explanationSource: null,
         },
       });
-    },
-
-    async countAnomalies(runId) {
-      return prisma.anomaly.count({ where: { analysisRunId: runId } });
     },
   };
 }

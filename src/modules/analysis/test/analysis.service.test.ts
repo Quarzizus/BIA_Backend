@@ -247,6 +247,14 @@ describe("runAnalysis pipeline", () => {
     expect(after1!.llmUsed).toBe(false);
     expect(after1!.summary).toContain("Detected 4");
 
+    // Run 1 (fallback): 4 hallazgos creados por reglas → explanation_source "rules".
+    const status1 = await failing.getStatus(run1.id);
+    expect(status1.anomaly_count).toBe(4);
+    expect(status1.new_anomalies).toBe(4);
+    expect(status1.refreshed_anomalies).toBe(0);
+    expect(status1.explanation_source).toBe("rules");
+    expect(status1.llm_used).toBe(false);
+
     const anomalies1 = await prisma.anomaly.findMany({
       where: { meter: { meterId: { in: FIXTURE_METERS } } },
       include: { meter: true },
@@ -289,10 +297,15 @@ describe("runAnalysis pipeline", () => {
       expect(anomaly.reason).not.toContain("por reglas");
     }
 
-    // F4: el run 2 refrescó (no creó) las 4 filas — anomaly_count 0 y el
+    // F4+: el run 2 refrescó (no creó) las 4 filas con textos LLM frescos —
+    // anomaly_count 4 (detectadas), new 0, refreshed 4, source "llm"; el
     // resumen distingue "0 new, 4 refreshed".
     const status2 = await healthy.getStatus(run2.id);
-    expect(status2.anomaly_count).toBe(0);
+    expect(status2.anomaly_count).toBe(4);
+    expect(status2.new_anomalies).toBe(0);
+    expect(status2.refreshed_anomalies).toBe(4);
+    expect(status2.explanation_source).toBe("llm");
+    expect(status2.llm_used).toBe(true);
     expect(after2!.summary).toContain("0 new, 4 refreshed");
   });
 
@@ -405,8 +418,8 @@ describe("runAnalysis pipeline", () => {
     }
   });
 
-  test("getStatus returns status, summary and anomaly count", async () => {
-    // Caché limpio: el run CREA las 4 anomalías (anomaly_count = 4).
+  test("getStatus returns status, summary, detected-anomaly counts and explanation source", async () => {
+    // Caché limpio: el run CREA las 4 anomalías (anomaly_count = 4, new = 4).
     await clearOpenAnomalies();
     const run = await prisma.analysisRun.create({
       data: { status: "RUNNING", lockToken: "single" },
@@ -416,7 +429,28 @@ describe("runAnalysis pipeline", () => {
     const status = await service.getStatus(run.id);
     expect(status.status).toBe("COMPLETED");
     expect(status.anomaly_count).toBe(4);
+    expect(status.new_anomalies).toBe(4);
+    expect(status.refreshed_anomalies).toBe(0);
+    expect(status.explanation_source).toBe("llm");
+    expect(status.llm_used).toBe(true);
     expect(typeof status.summary).toBe("string");
+  });
+
+  test("getStatus exposes a null explanation source and zero counts while RUNNING", async () => {
+    const run = await prisma.analysisRun.create({
+      data: { status: "RUNNING", lockToken: "single" },
+    });
+    createdRunIds.push(run.id);
+    const status = await service.getStatus(run.id);
+    expect(status.status).toBe("RUNNING");
+    expect(status.anomaly_count).toBe(0);
+    expect(status.new_anomalies).toBe(0);
+    expect(status.refreshed_anomalies).toBe(0);
+    expect(status.explanation_source).toBeNull();
+    expect(status.completed_at).toBeNull();
+    // El run queda RUNNING con lockToken='single': se elimina de inmediato para
+    // NO bloquear la garantía de run único (P2002) de los demás tests.
+    await prisma.analysisRun.delete({ where: { id: run.id } });
   });
 
   test("getStatus throws 404 NOT_FOUND for an unknown run", async () => {
@@ -617,10 +651,14 @@ describe("runAnalysis pipeline", () => {
       );
     }
 
-    // F4: countAnomalies(run2) = anomalías CREADAS por run2 = 0 (todas las
-    // filas las creó run1); el resumen distingue "0 new, 4 refreshed".
+    // F4+: anomaly_count = detectadas en el run 2 = 4 (0 creadas + 4 refrescadas,
+    // todas con textos LLM reutilizados sin llamada) → explanation_source
+    // "llm_cached"; el resumen distingue "0 new, 4 refreshed".
     const status2 = await countingService.getStatus(run2.id);
-    expect(status2.anomaly_count).toBe(0);
+    expect(status2.anomaly_count).toBe(4);
+    expect(status2.new_anomalies).toBe(0);
+    expect(status2.refreshed_anomalies).toBe(4);
+    expect(status2.explanation_source).toBe("llm_cached");
     expect(status2.llm_used).toBe(false);
     expect(after!.summary).toContain("0 new, 4 refreshed");
   });
@@ -775,9 +813,15 @@ describe("runAnalysis pipeline", () => {
       expect(rows[0]!.analysisRunId).toBe(baselineRun.id);
     }
 
-    // F4: anomaly_count = anomalías CREADAS por este run = 1 (solo M-PZ1).
+    // F4+: anomaly_count = detectadas en el run = 4 (1 creada nueva para M-PZ1
+    // + 3 refrescadas). M-PZ1 falló el caché (la RESOLVED es historial) → el
+    // LLM se llamó → explanation_source "llm".
     const status = await service.getStatus(run.id);
-    expect(status.anomaly_count).toBe(1);
+    expect(status.anomaly_count).toBe(4);
+    expect(status.new_anomalies).toBe(1);
+    expect(status.refreshed_anomalies).toBe(3);
+    expect(status.explanation_source).toBe("llm");
+    expect(status.llm_used).toBe(true);
   });
 
   test("meter status stays CRITICAL when a run produces MEDIUM while an OPEN HIGH anomaly is active (F1)", async () => {

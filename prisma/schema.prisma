@@ -130,6 +130,15 @@ model AnalysisRun {
   lockToken   String?        @unique
   summary     String?
   llmUsed     Boolean        @default(false)
+  // Contadores del run (contrato de status F4+): nuevas creadas por el run y
+  // refrescadas sobre filas OPEN existentes. anomaly_count del status =
+  // newCount + refreshedCount (detectadas en este run, no solo creadas).
+  newCount          Int      @default(0)
+  refreshedCount    Int      @default(0)
+  // Origen de las explicaciones del run: "llm" (LLM llamado este run),
+  // "llm_cached" (textos LLM reutilizados sin llamada), "rules" (fallback por
+  // reglas) o null (run RUNNING/FAILED o sin hallazgos).
+  explanationSource String?
   startedAt   DateTime       @default(now())
   completedAt DateTime?
   anomalies   Anomaly[]

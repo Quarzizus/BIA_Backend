@@ -47,9 +47,11 @@ import {
  *    explicar. Fallback por reglas POR MEDIDOR si el LLM falla (explicación en
  *    español, llmGenerated=false para esa fila): un timeout en un medidor no
  *    borra los hallazgos del resto.
- *  - getStatus(): contrato de polling para GET /ai/analysis/:id. F4:
- *    anomaly_count cuenta las anomalías CREADAS por el run (el refresh no
- *    re-parenta analysisRunId; el resumen distingue "(X new, Y refreshed)").
+ *  - getStatus(): contrato de polling para GET /ai/analysis/:id. F4+:
+ *    anomaly_count = anomalías DETECTADAS en el run (newCount + refreshedCount),
+ *    con desglose new_anomalies/refreshed_anomalies y explanation_source
+ *    ("llm" | "llm_cached" | "rules" | null). El refresh no re-parenta
+ *    analysisRunId; el resumen distingue "(X new, Y refreshed)".
  *
  * Solo orquestación: toda la persistencia vive en analysis.repository, los
  * tipos/constantes de dominio puro en analysis.domain, y las reglas compartidas
@@ -58,11 +60,29 @@ import {
 
 export type AnalysisDeps = LlmEnv;
 
+/**
+ * Origen de las explicaciones del run (contrato de status):
+ *  - "llm": el LLM fue llamado y respondió en este run (clasificación/explicación).
+ *  - "llm_cached": no hubo llamada al LLM; los textos se reutilizaron de
+ *    anomalías OPEN previas originadas por el LLM con evidencia idéntica.
+ *  - "rules": textos de fallback por reglas (proveedor caído o mixto sin LLM).
+ *  - null: run RUNNING/FAILED o sin hallazgos.
+ */
+export type ExplanationSource = "llm" | "llm_cached" | "rules";
+
 export interface AnalysisRunStatus {
   id: string;
   status: string;
   summary: string | null;
+  /** Anomalías DETECTADAS en este run = nuevas + refrescadas (no solo creadas). */
   anomaly_count: number;
+  /** Anomalías creadas nuevas por este run. */
+  new_anomalies: number;
+  /** Anomalías OPEN existentes refrescadas por este run. */
+  refreshed_anomalies: number;
+  /** Origen de las explicaciones (null mientras RUNNING/FAILED o sin hallazgos). */
+  explanation_source: ExplanationSource | null;
+  /** Backward compat: true si el LLM fue llamado en este run (caché → false). */
   llm_used: boolean;
   started_at: string;
   completed_at: string | null;
@@ -345,13 +365,24 @@ export function createAnalysisService(
 
     // llm_used del run: true si CUALQUIER hallazgo usó el LLM en este run.
     const llmUsed = findings.some((finding) => finding.llmUsed);
+    // explanation_source del run: "llm" si se llamó al LLM; si NO se llamó y
+    // todos los textos provienen del LLM (reutilizados de un run previo con la
+    // misma evidencia) → "llm_cached"; si hubo hallazgos pero alguno es fallback
+    // por reglas → "rules"; sin hallazgos → null (no hay explicaciones que
+    // reportar; "rules" sería engañoso).
+    const explanationSource: ExplanationSource | null = (() => {
+      if (findings.length === 0) return null;
+      if (findings.some((finding) => finding.llmUsed)) return "llm";
+      if (findings.every((finding) => finding.llmGenerated)) return "llm_cached";
+      return "rules";
+    })();
     let summary = `Detected ${findings.length} anomaly(ies) across ${new Set(findings.map((finding) => finding.meterId)).size} meter(s)`;
     // F6: los fallos por medidor se reflejan en el resumen (persistFindings
     // añade después "(X new, Y refreshed)").
     if (failedMeters > 0) {
       summary += `; ${failedMeters} meter${failedMeters === 1 ? "" : "s"} failed`;
     }
-    await repository.persistFindings(runId, findings, summary, llmUsed);
+    await repository.persistFindings(runId, findings, summary, llmUsed, explanationSource);
   }
 
   return {
@@ -387,12 +418,18 @@ export function createAnalysisService(
       if (!run) {
         throw new ApiError(404, "NOT_FOUND", `Analysis run ${runId} not found`);
       }
-      const anomalyCount = await repository.countAnomalies(runId);
+      // F4+: anomaly_count = detectadas en ESTE run (nuevas + refrescadas), no
+      // solo las creadas. Un re-run sobre datos idénticos reporta las 4 con
+      // new_anomalies 0 y refreshed_anomalies 4 (antes reportaba 0).
+      const anomalyCount = run.newCount + run.refreshedCount;
       return {
         id: run.id,
         status: run.status,
         summary: run.summary,
         anomaly_count: anomalyCount,
+        new_anomalies: run.newCount,
+        refreshed_anomalies: run.refreshedCount,
+        explanation_source: run.explanationSource as ExplanationSource | null,
         llm_used: run.llmUsed,
         started_at: run.startedAt.toISOString(),
         completed_at: run.completedAt?.toISOString() ?? null,
