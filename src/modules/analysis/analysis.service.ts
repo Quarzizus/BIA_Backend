@@ -1,6 +1,7 @@
 import type { Meter, PrismaClient, Reading } from "../../generated/prisma/client";
 import { ApiError } from "../../shared/errors";
 import type { LlmEnv } from "../../shared/domain/llm";
+import { normalizeAction, normalizeReason } from "../../shared/domain/llm-format";
 import { logger } from "../../shared/logger";
 import { computeBaseline } from "./stages/analysis.baseline.calculator";
 import { classifyAnomaly, coveringEvent, type MeterEvent } from "./stages/analysis.classifier";
@@ -178,8 +179,10 @@ export function createAnalysisService(
         severity,
         confidence: SEVERITY_CONFIDENCE[severity],
         signals: consolidated.signals,
-        reason,
-        recommendedAction,
+        // Punto único de normalización: garantiza el contrato de formato para
+        // TANTO la salida del LLM como el fallback por reglas (idempotente).
+        reason: normalizeReason(reason),
+        recommendedAction: normalizeAction(recommendedAction),
         relatedEventId: relatedEvent?.id ?? null,
       },
       llmUsed,

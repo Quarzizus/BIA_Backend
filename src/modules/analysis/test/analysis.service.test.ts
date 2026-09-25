@@ -263,6 +263,53 @@ describe("runAnalysis pipeline", () => {
     }
   });
 
+  test("persisted anomalies from the LLM path are normalized (wall-of-text input)", async () => {
+    // El LLM falso ignora el contrato de formato: reason en un muro de texto
+    // sin párrafos y recommended_action numerada. El normalizador del servicio
+    // debe garantizar el formato canónico ANTES de persistir.
+    const wallOfText = createAnalysisService(
+      prisma,
+      createFakeLlm({
+        async explain() {
+          return {
+            reason:
+              "El consumo pasó de 43.7 a 92.8 kWh/h (+112.3%), con un pico de |z| 9.73 a las 14:00 del 12-sep. No hay evento que explique la señal: el medidor no registró mantenimiento ni cambios operativos. El impacto es alto: el consumo se duplicó y se mantiene elevado. Se recomienda inspeccionar el medidor y verificar la carga conectada.",
+            recommended_action:
+              "1) Inspeccionar el medidor y sus conexiones.\n2) Verificar la carga conectada al circuito.\n3) Revisar el historial de las últimas 48 horas.",
+          };
+        },
+      }),
+      { AI_API_KEY: "test-key", AI_BASE_URL: "https://fake/v1", AI_MODEL: "test" },
+    );
+    const run = await prisma.analysisRun.create({
+      data: { status: "RUNNING", lockToken: "single" },
+    });
+    createdRunIds.push(run.id);
+    await wallOfText.runAnalysis(run.id, { meterCodes: ["M-PZ1"] });
+
+    const anomalies = await prisma.anomaly.findMany({
+      where: { analysisRunId: run.id },
+      include: { meter: true },
+    });
+    expect(anomalies).toHaveLength(1);
+    const anomaly = anomalies[0]!;
+
+    // El muro de texto se normalizó a 2-3 párrafos separados por línea en
+    // blanco, sin romper los decimales/porcentajes de la evidencia.
+    const paragraphs = anomaly.reason!.split("\n\n");
+    expect(paragraphs.length).toBeGreaterThanOrEqual(2);
+    expect(paragraphs.length).toBeLessThanOrEqual(3);
+    expect(anomaly.reason).toContain("43.7 a 92.8 kWh/h (+112.3%)");
+
+    // La acción numerada se normalizó a bullets "- ", uno por línea.
+    const actionLines = anomaly.recommendedAction!.split("\n");
+    expect(actionLines.length).toBeGreaterThanOrEqual(2);
+    expect(actionLines.length).toBeLessThanOrEqual(4);
+    for (const line of actionLines) {
+      expect(line.startsWith("- ")).toBe(true);
+    }
+  });
+
   test("getStatus returns status, summary and anomaly count", async () => {
     const run = await prisma.analysisRun.create({
       data: { status: "RUNNING", lockToken: "single" },

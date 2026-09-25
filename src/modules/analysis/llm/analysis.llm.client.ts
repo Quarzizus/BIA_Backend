@@ -132,8 +132,8 @@ export async function classifyWithLlm(
     "Clasifica la siguiente anomalía eléctrica ambigua (estadística o evento cercano sin cobertura).",
     "Devuelve type (REAL_ANOMALY | EXPLAINABLE_ANOMALY | FALSE_POSITIVE | DATA_QUALITY),",
     "severity (HIGH | MEDIUM | LOW), reason y recommended_action.",
-    'Formato de reason: 2-3 párrafos cortos separados por una línea en blanco ("\\n\\n"), cada párrafo de 1-3 frases.',
-    'Formato de recommended_action: lista markdown de 2-4 items, cada uno con prefijo "- " y una sola frase imperativa.',
+    'Formato de reason: 2-3 párrafos cortos separados por una línea en blanco ("\\n\\n"), cada párrafo de 1-3 frases; NO devuelvas un muro de texto.',
+    'Formato de recommended_action: lista de 2-4 items, cada uno en su línea con prefijo "- " y una sola frase imperativa en español; NO numeres con "1)" ni "2.".',
   ].join("\n");
   const data = await completeJson(env, task, { ...input }, classifySchema as z.ZodType<unknown>);
   return data as unknown as ClassifyOutput;

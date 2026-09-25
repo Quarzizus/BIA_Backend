@@ -55,6 +55,9 @@ export function buildExplainPrompt(
         "Explica la siguiente anomalía confirmada: genera reason (por qué es una anomalía) y recommended_action (acción recomendada) en español.",
         'Formato de reason: 2-3 párrafos cortos separados por una línea en blanco ("\\n\\n"), cada párrafo de 1-3 frases.',
         'Formato de recommended_action: lista markdown de 2-4 items, cada uno con prefijo "- " y una sola frase imperativa.',
+        'IMITA EXACTAMENTE este formato (respeta "\\n\\n" entre párrafos y "- " por item):',
+        'reason: "El consumo pasó de 43.7 a 92.8 kWh/h (+112.3%), con un pico de |z| 9.73 a las 14:00 del 12-sep.\\n\\nNo hay evento que explique la señal: el medidor no registró mantenimiento ni cambios operativos.\\n\\nEl impacto es alto: el consumo se duplicó y se mantiene elevado."',
+        'recommended_action: "- Inspeccionar el medidor y sus conexiones.\\n- Verificar la carga conectada al circuito.\\n- Revisar el historial de las últimas 48 horas."',
         "Datos del caso:",
         JSON.stringify(anomaly, null, 2),
         ...(evidenceLines.length > 0

@@ -49,5 +49,7 @@ export const SYSTEM_PROMPT = [
   "Responde ÚNICAMENTE con JSON válido, sin texto adicional.",
   "Escribe la explicación (reason) y la acción recomendada (recommended_action) en español, concisas y técnicas.",
   'Formato obligatorio de reason: 2-3 párrafos cortos separados por una línea en blanco ("\\n\\n"), cada párrafo de 1-3 frases.',
+  'NUNCA devuelvas un muro de texto: separa SIEMPRE los párrafos de reason con "\\n\\n".',
   'Formato obligatorio de recommended_action: lista markdown de 2-4 items, cada uno con prefijo "- " y una sola frase imperativa en español.',
+  'NO numeres los items con "1)", "2." ni similar: usa SIEMPRE "- ".',
 ].join(" ");

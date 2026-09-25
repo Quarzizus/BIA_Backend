@@ -186,7 +186,8 @@ describe("E2E pipeline on real seeded data (spec analysis-pipeline)", () => {
     expect(real).toBeDefined();
     expect(real!.type).toBe("REAL_ANOMALY");
     expect(real!.severity).toBe("HIGH");
-    expect(real!.recommended_action).toBe("Revisar la instalación del medidor.");
+    // El normalizador garantiza el contrato de formato en lo expuesto por la API.
+    expect(real!.recommended_action).toBe("- Revisar la instalación del medidor.");
   });
 
   test("dashboard summary reflects the recomputed meter statuses (spec dashboard)", async () => {

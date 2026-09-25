@@ -46,6 +46,21 @@ describe("buildExplainPrompt", () => {
     expect(messages[1]!.content).toContain("markdown");
   });
 
+  test("embeds the few-shot example with the exact desired format", () => {
+    const messages = buildExplainPrompt(anomaly);
+    // Ejemplo few-shot en el prompt del usuario para que el modelo imite el formato.
+    expect(messages[1]!.content).toContain("IMITA EXACTAMENTE");
+    expect(messages[1]!.content).toContain(
+      "El consumo pasó de 43.7 a 92.8 kWh/h (+112.3%), con un pico de |z| 9.73 a las 14:00 del 12-sep.",
+    );
+    expect(messages[1]!.content).toContain("- Inspeccionar el medidor y sus conexiones.");
+    // El ejemplo muestra "\\n\\n" literal (representación JSON de los párrafos).
+    expect(messages[1]!.content).toContain("\\n\\n");
+    // El system prompt refuerza el contrato: nada de muros de texto ni numeración.
+    expect(messages[0]!.content).toContain("muro de texto");
+    expect(messages[0]!.content).toContain("NO numeres");
+  });
+
   test("embeds readable per-variable evidence lines (baseline → reciente)", () => {
     const messages = buildExplainPrompt(anomaly);
     expect(messages[1]!.content).toContain("Evidencia por variable (baseline → reciente):");
