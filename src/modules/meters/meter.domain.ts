@@ -1,6 +1,5 @@
 import type { Meter, Reading } from "../../generated/prisma/client";
 import type { BaselineStats } from "../../shared/domain/baseline";
-import type { ReadingDto } from "../../shared/domain/reading";
 
 export interface MeterSummary {
   id: string;
@@ -29,7 +28,8 @@ export interface MeterDetail {
   } | null;
   baseline: BaselineStats;
   variation_pct: number | null;
-  history: ReadingDto[];
+  // Nota: sin `history` — el frontend carga el historial paginado vía
+  // GET /meters/:meterId/readings.
 }
 
 export interface MeterService {
@@ -44,5 +44,4 @@ export interface MeterRepository {
   latestReadings(meterCodes: string[]): Promise<Reading[]>;
   /** Ventana de baseline de primeros 7 días por medidor, keyed por el CÓDIGO del medidor. */
   baselineReadings(meterCodes: string[]): Promise<Reading[]>;
-  history(meterId: string): Promise<Reading[]>;
 }

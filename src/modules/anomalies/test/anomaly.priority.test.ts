@@ -240,10 +240,11 @@ describe("GET /anomalies con priority", () => {
   test("cada item expone priority (entero 0-100) y ordena por priority desc", async () => {
     const res = await fetch(`${server.baseUrl}/anomalies`);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as Array<Record<string, any>>;
-    expect(body).toHaveLength(5);
+    const body = (await res.json()) as { items: Array<Record<string, any>>; total: number };
+    expect(body.items).toHaveLength(5);
+    expect(body.total).toBe(5);
 
-    for (const item of body) {
+    for (const item of body.items) {
       expect(typeof item.priority).toBe("number");
       expect(Number.isInteger(item.priority)).toBe(true);
       expect(item.priority).toBeGreaterThanOrEqual(0);
@@ -251,38 +252,38 @@ describe("GET /anomalies con priority", () => {
     }
 
     // HIGH reciente REAL primero, FALSE_POSITIVE LOW al final (severidad + penalidad).
-    const meterOrder = body.map((a) => a.meter_id);
+    const meterOrder = body.items.map((a) => a.meter_id);
     expect(meterOrder).toEqual(["M-P1", "M-P2", "M-P3", "M-P5", "M-P4"]);
 
     // Orden estrictamente descendente de priority.
-    for (let i = 1; i < body.length; i++) {
-      expect(body[i - 1]!.priority).toBeGreaterThan(body[i]!.priority);
+    for (let i = 1; i < body.items.length; i++) {
+      expect(body.items[i - 1]!.priority).toBeGreaterThan(body.items[i]!.priority);
     }
   });
 
   test("la recencia pesa: HIGH reciente > HIGH antigua (mismo resto de señales)", async () => {
     const res = await fetch(`${server.baseUrl}/anomalies`);
-    const body = (await res.json()) as Array<Record<string, any>>;
-    const p1 = body.find((a) => a.meter_id === "M-P1")!;
-    const p2 = body.find((a) => a.meter_id === "M-P2")!;
+    const body = (await res.json()) as { items: Array<Record<string, any>> };
+    const p1 = body.items.find((a) => a.meter_id === "M-P1")!;
+    const p2 = body.items.find((a) => a.meter_id === "M-P2")!;
     expect(p1.priority).toBeGreaterThan(p2.priority);
   });
 
   test("?sort=priority explícito devuelve el mismo orden por defecto", async () => {
     const res = await fetch(`${server.baseUrl}/anomalies?sort=priority`);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as Array<Record<string, any>>;
-    expect(body.map((a) => a.meter_id)).toEqual(["M-P1", "M-P2", "M-P3", "M-P5", "M-P4"]);
+    const body = (await res.json()) as { items: Array<Record<string, any>> };
+    expect(body.items.map((a) => a.meter_id)).toEqual(["M-P1", "M-P2", "M-P3", "M-P5", "M-P4"]);
   });
 
   test("?sort=detected_at devuelve orden cronológico descendente", async () => {
     const res = await fetch(`${server.baseUrl}/anomalies?sort=detected_at`);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as Array<Record<string, any>>;
-    expect(body.map((a) => a.meter_id)).toEqual(["M-P1", "M-P3", "M-P4", "M-P5", "M-P2"]);
+    const body = (await res.json()) as { items: Array<Record<string, any>> };
+    expect(body.items.map((a) => a.meter_id)).toEqual(["M-P1", "M-P3", "M-P4", "M-P5", "M-P2"]);
 
-    for (let i = 1; i < body.length; i++) {
-      expect(body[i - 1]!.detected_at >= body[i]!.detected_at).toBe(true);
+    for (let i = 1; i < body.items.length; i++) {
+      expect(body.items[i - 1]!.detected_at >= body.items[i]!.detected_at).toBe(true);
     }
   });
 
@@ -309,7 +310,9 @@ describe("priority en detalle y PATCH", () => {
     expect(p1DetailBody.priority).toBeGreaterThanOrEqual(0);
     expect(p1DetailBody.priority).toBeLessThanOrEqual(100);
     // Consistencia lista vs detalle (mismo instante de referencia).
-    const p1ListBody = (p1List as Array<Record<string, any>>).find((a) => a.meter_id === "M-P1")!;
+    const p1ListBody = (p1List as { items: Array<Record<string, any>> }).items.find(
+      (a) => a.meter_id === "M-P1",
+    )!;
     expect(p1DetailBody.priority).toBe(p1ListBody.priority);
     // Recencia: la HIGH antigua puntúa menos que la reciente.
     expect(p2DetailBody.priority).toBeLessThan(p1DetailBody.priority);

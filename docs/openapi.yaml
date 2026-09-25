@@ -69,8 +69,9 @@ paths:
       tags: [Medidores]
       summary: Detalle de un medidor
       description: |
-        Estado actual, estadísticas de baseline, variación porcentual y el
-        historial completo de lecturas del medidor.
+        Estado actual, estadísticas de baseline y variación porcentual del
+        medidor. El historial de lecturas ya NO se incluye aquí: se carga
+        paginado con `GET /meters/{meterId}/readings`.
       operationId: getMeter
       parameters:
         - $ref: "#/components/parameters/MeterId"
@@ -91,25 +92,26 @@ paths:
   /meters/{meterId}/readings:
     get:
       tags: [Medidores]
-      summary: Lecturas de un medidor en un rango
+      summary: Lecturas de un medidor (paginadas, filtrables por rango)
       description: |
-        Lecturas horarias del medidor ordenadas ascendentemente, filtradas por
-        `from`/`to` (ISO 8601 UTC, inclusivos). Sin filtros se devuelve el
-        historial completo.
+        Lecturas horarias del medidor ordenadas ascendentemente, paginadas y
+        opcionalmente filtradas por `from`/`to` (ISO 8601 UTC, inclusivos). La
+        respuesta es un envelope paginado: `items` + `total` (conteo del rango
+        filtrado completo), `page`, `page_size` y `has_more`.
       operationId: listReadings
       parameters:
         - $ref: "#/components/parameters/MeterId"
         - $ref: "#/components/parameters/ReadingsFrom"
         - $ref: "#/components/parameters/ReadingsTo"
+        - $ref: "#/components/parameters/ReadingsPage"
+        - $ref: "#/components/parameters/ReadingsPageSize"
       responses:
         "200":
-          description: Lecturas en el rango solicitado
+          description: Lecturas en el rango solicitado (envelope paginado)
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/ReadingDto"
+                $ref: "#/components/schemas/ReadingsListResponse"
         "400":
           $ref: "#/components/responses/ValidationError"
         "404":
@@ -120,26 +122,29 @@ paths:
   /anomalies:
     get:
       tags: [Anomalías]
-      summary: Lista de anomalías
+      summary: Lista de anomalías (paginada, con filtros)
       description: |
-        Anomalías detectadas, opcionalmente filtradas por estado y severidad.
-        Orden por defecto: `priority` descendente (score de prioridad calculado
-        por el backend; mayor = más urgente). Con `?sort=detected_at` se obtiene
-        el orden cronológico descendente (orden previo, compatibilidad).
+        Anomalías detectadas, paginadas y opcionalmente filtradas por estado,
+        severidad, tipo y código de medidor. Orden por defecto: `priority`
+        descendente (score de prioridad calculado por el backend; mayor = más
+        urgente). Con `?sort=detected_at` se obtiene el orden cronológico
+        descendente (orden previo, compatibilidad).
       operationId: listAnomalies
       parameters:
         - $ref: "#/components/parameters/AnomalyStatusFilter"
         - $ref: "#/components/parameters/AnomalySeverityFilter"
         - $ref: "#/components/parameters/AnomalySortFilter"
+        - $ref: "#/components/parameters/AnomalyTypeFilter"
+        - $ref: "#/components/parameters/AnomalyMeterIdFilter"
+        - $ref: "#/components/parameters/AnomalyPage"
+        - $ref: "#/components/parameters/AnomalyPageSize"
       responses:
         "200":
-          description: Lista de anomalías
+          description: Lista de anomalías (envelope paginado)
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/AnomalyListItem"
+                $ref: "#/components/schemas/AnomalyListResponse"
         "400":
           $ref: "#/components/responses/ValidationError"
         "500":
@@ -273,10 +278,12 @@ paths:
       summary: Estado de un análisis
       description: |
         Estado del run (`RUNNING`, `COMPLETED` o `FAILED`), resumen, número de
-        anomalías consolidadas y si el LLM participó. Endpoint de polling.
-        `anomaly_count` cuenta las anomalías CREADAS por el run: un re-run que
-        solo refresca filas existentes reporta 0 (el resumen distingue
-        `(X new, Y refreshed)`).
+        anomalías detectadas y origen de las explicaciones. Endpoint de polling.
+        `anomaly_count` cuenta las anomalías DETECTADAS en el run (nuevas +
+        refrescadas): un re-run sobre los mismos datos reporta las mismas
+        anomalías con `new_anomalies: 0` y `refreshed_anomalies: N`. El
+        resumen distingue `(X new, Y refreshed)` y `explanation_source`
+        diferencia LLM llamado / textos LLM reutilizados de caché / reglas.
       operationId: getAnalysisStatus
       parameters:
         - $ref: "#/components/parameters/AnalysisRunId"
@@ -358,6 +365,61 @@ components:
         type: string
         enum: [priority, detected_at]
         default: priority
+    AnomalyTypeFilter:
+      name: type
+      in: query
+      required: false
+      description: Filtra por tipo de anomalía
+      schema:
+        $ref: "#/components/schemas/AnomalyType"
+    AnomalyMeterIdFilter:
+      name: meter_id
+      in: query
+      required: false
+      description: |
+        Filtra por el CÓDIGO público del medidor (p. ej. `M-109`), no por el ID
+        interno.
+      schema:
+        type: string
+        example: M-109
+    AnomalyPage:
+      name: page
+      in: query
+      required: false
+      description: Página solicitada (1-indexada)
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    AnomalyPageSize:
+      name: page_size
+      in: query
+      required: false
+      description: Tamaño de página, entre 1 y 100
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    ReadingsPage:
+      name: page
+      in: query
+      required: false
+      description: Página solicitada (1-indexada)
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    ReadingsPageSize:
+      name: page_size
+      in: query
+      required: false
+      description: Tamaño de página, entre 1 y 1000
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 100
 
   responses:
     ValidationError:
@@ -507,6 +569,31 @@ components:
           type: string
           description: Estado de la lectura (en el dataset actual, `OK`)
 
+    ReadingsListResponse:
+      type: object
+      description: |
+        Envelope paginado de lecturas. `total` es el conteo del rango filtrado
+        completo (antes de paginar); `has_more = page * page_size < total`.
+      required: [items, total, page, page_size, has_more]
+      properties:
+        items:
+          type: array
+          description: Página de lecturas, orden ascendente por timestamp
+          items:
+            $ref: "#/components/schemas/ReadingDto"
+        total:
+          type: integer
+          description: Conteo total del rango filtrado (antes de paginar)
+        page:
+          type: integer
+          description: Página devuelta (1-indexada)
+        page_size:
+          type: integer
+          description: Tamaño de página aplicado
+        has_more:
+          type: boolean
+          description: true si existen más páginas después de esta
+
     CurrentReading:
       type: object
       description: Lectura más reciente del medidor
@@ -528,6 +615,9 @@ components:
 
     MeterDetail:
       type: object
+      description: |
+        Detalle del medidor. El historial de lecturas NO se incluye: se carga
+        paginado con `GET /meters/{meterId}/readings`.
       required:
         - id
         - meter_id
@@ -537,7 +627,6 @@ components:
         - current
         - baseline
         - variation_pct
-        - history
       properties:
         id:
           type: string
@@ -558,11 +647,6 @@ components:
           $ref: "#/components/schemas/BaselineStats"
         variation_pct:
           type: [number, "null"]
-        history:
-          type: array
-          description: Historial completo de lecturas, ascendente
-          items:
-            $ref: "#/components/schemas/ReadingDto"
 
     AnomalyType:
       type: string
@@ -636,6 +720,31 @@ components:
             Score de prioridad calculado por el backend — mayor = más urgente.
             Compuesto por severidad/impacto/recencia/tipo; regla transparente y
             documentada en el código (NO proviene del LLM). Rango 0-100.
+
+    AnomalyListResponse:
+      type: object
+      description: |
+        Envelope paginado de anomalías. `total` es el conteo del conjunto
+        filtrado completo (antes de paginar); `has_more = page * page_size < total`.
+      required: [items, total, page, page_size, has_more]
+      properties:
+        items:
+          type: array
+          description: Página de anomalías (ordenadas según `sort`)
+          items:
+            $ref: "#/components/schemas/AnomalyListItem"
+        total:
+          type: integer
+          description: Conteo total del conjunto filtrado (antes de paginar)
+        page:
+          type: integer
+          description: Página devuelta (1-indexada)
+        page_size:
+          type: integer
+          description: Tamaño de página aplicado
+        has_more:
+          type: boolean
+          description: true si existen más páginas después de esta
 
     VariableEvidence:
       type: object
@@ -825,6 +934,9 @@ components:
         - status
         - summary
         - anomaly_count
+        - new_anomalies
+        - refreshed_anomalies
+        - explanation_source
         - llm_used
         - started_at
         - completed_at
@@ -839,10 +951,26 @@ components:
           description: Resumen del run (presente al completar o fallar)
         anomaly_count:
           type: integer
-          description: Anomalías creadas por el run (los re-runs suelen mostrar 0; el resumen distingue nuevas vs refrescadas)
+          description: Anomalías detectadas en el run = nuevas + refrescadas (un re-run sobre datos idénticos reporta las mismas anomalías, no 0)
+        new_anomalies:
+          type: integer
+          description: Anomalías creadas nuevas por este run
+        refreshed_anomalies:
+          type: integer
+          description: Anomalías OPEN existentes refrescadas por este run (mismo medidor y tipo)
+        explanation_source:
+          type: [string, "null"]
+          enum: [llm, llm_cached, rules, "null"]
+          description: |
+            Origen de las explicaciones del run; null mientras el run está
+            RUNNING/FAILED o si no hubo hallazgos:
+            - `llm`: el LLM fue llamado y respondió en este run.
+            - `llm_cached`: no hubo llamada al LLM; los textos se reutilizaron
+              de anomalías previas originadas por el LLM con evidencia idéntica.
+            - `rules`: explicaciones de fallback generadas por reglas.
         llm_used:
           type: boolean
-          description: Si el LLM participó en la clasificación/explicación
+          description: "Legacy: true si el LLM participó en la clasificación/explicación este run (caché → false). Preferir `explanation_source`."
         started_at:
           type: string
           format: date-time

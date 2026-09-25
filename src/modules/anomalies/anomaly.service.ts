@@ -8,6 +8,7 @@ import { computeAnomalyPriority } from "./anomaly.domain";
 import type {
   AnomalyDetail,
   AnomalyFilters,
+  AnomalyListResponse,
   AnomalyListItem,
   AnomalyRow,
   AnomalyService,
@@ -75,13 +76,27 @@ export function createAnomalyService(prisma: PrismaClient): AnomalyService {
   };
 
   return {
-    async list(filters: AnomalyFilters): Promise<AnomalyListItem[]> {
+    async list(filters: AnomalyFilters): Promise<AnomalyListResponse> {
       // Un solo `now` por petición: todas las filas comparten el mismo instante
       // de referencia para la recencia.
       const now = new Date();
       const items = (await repository.list(filters)).map((anomaly) => toListItem(anomaly, now));
       sortItems(items, filters.sort);
-      return items;
+
+      // La paginación ocurre en el servicio (NO en SQL): el orden por prioridad
+      // se computa en memoria y el conjunto filtrado es pequeño. `total` cuenta
+      // TODO el conjunto filtrado, antes de cortar la página.
+      const total = items.length;
+      const page = filters.page;
+      const pageSize = filters.pageSize;
+      const start = (page - 1) * pageSize;
+      return {
+        items: items.slice(start, start + pageSize),
+        total,
+        page,
+        page_size: pageSize,
+        has_more: page * pageSize < total,
+      };
     },
 
     detail,

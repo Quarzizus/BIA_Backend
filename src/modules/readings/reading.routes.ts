@@ -17,7 +17,15 @@ export function createReadingsRouter(prisma: PrismaClient): Router {
     if (!query.success) {
       throw new ApiError(400, "VALIDATION_ERROR", formatZodIssues(query.error));
     }
-    res.json(await service.list(params.data.meterId, query.data));
+    // El query usa `page_size` (snake_case, contrato API); el dominio usa `pageSize`.
+    res.json(
+      await service.list(params.data.meterId, {
+        from: query.data.from,
+        to: query.data.to,
+        page: query.data.page,
+        pageSize: query.data.page_size,
+      }),
+    );
   });
 
   return router;

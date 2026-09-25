@@ -19,6 +19,10 @@ export function createAnomalyRepository(prisma: PrismaClient): AnomalyRepository
         where: {
           ...(filters.status ? { status: filters.status } : {}),
           ...(filters.severity ? { severity: filters.severity } : {}),
+          ...(filters.type ? { type: filters.type } : {}),
+          // El filtro llega como código público de medidor (`meterCode`, p. ej.
+          // "M-109"); se aplica sobre la relación `meter.meterId`.
+          ...(filters.meterCode ? { meter: { meterId: filters.meterCode } } : {}),
         },
         include: anomalyInclude,
         orderBy: { detectedAt: "desc" },

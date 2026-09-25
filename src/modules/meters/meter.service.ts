@@ -1,6 +1,5 @@
 import type { PrismaClient } from "../../generated/prisma/client";
 import { ApiError } from "../../shared/errors";
-import { toReadingDto } from "../../shared/domain/reading";
 import { computeBaselineStats, variationPct } from "../../shared/domain/baseline";
 import { createMeterRepository } from "./meter.repository";
 import type { MeterDetail, MeterService, MeterSummary } from "./meter.domain";
@@ -59,13 +58,17 @@ export function createMeterService(prisma: PrismaClient): MeterService {
         throw new ApiError(404, "NOT_FOUND", `Meter ${meterId} not found`);
       }
 
-      const [history, baselineReadings] = await Promise.all([
-        repository.history(meter.meterId),
+      // Sin `history`: el frontend carga las lecturas paginadas vía
+      // GET /meters/:meterId/readings. Aquí solo se resuelve la lectura actual
+      // (la más reciente) y el baseline de los primeros 7 días.
+      const [latest, baselineReadings] = await Promise.all([
+        repository.latestReadings([meter.meterId]),
         repository.baselineReadings([meter.meterId]),
       ]);
 
       const baseline = computeBaselineStats(baselineReadings);
-      const current = history.length > 0 ? history[history.length - 1] : null;
+      // latestReadings devuelve una fila por medidor en orden descendente → [0] es la más reciente.
+      const current = latest.length > 0 ? latest[0] : null;
 
       return {
         id: meter.id,
@@ -85,7 +88,6 @@ export function createMeterService(prisma: PrismaClient): MeterService {
           : null,
         baseline,
         variation_pct: variationPct(current?.consumptionKwh ?? null, baseline.consumption_kwh.mean),
-        history: history.map(toReadingDto),
       };
     },
   };

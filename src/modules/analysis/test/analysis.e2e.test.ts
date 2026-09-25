@@ -91,7 +91,11 @@ describe("E2E pipeline on real seeded data (spec analysis-pipeline)", () => {
 
     const completed = await waitForCompletion(analysis_id);
     expect(completed.status).toBe("COMPLETED");
+    // Run fresco con caché vacío: 4 detectadas, todas nuevas, LLM llamado.
     expect(completed.anomaly_count).toBe(4);
+    expect(completed.new_anomalies).toBe(4);
+    expect(completed.refreshed_anomalies).toBe(0);
+    expect(completed.explanation_source).toBe("llm");
     expect(completed.llm_used).toBe(true);
 
     // 4 anomalías, una por medidor afectado (escenario anomalies-api de la spec).
@@ -195,8 +199,8 @@ describe("E2E pipeline on real seeded data (spec analysis-pipeline)", () => {
   test("GET /anomalies exposes the 4 anomalies through the API (spec anomalies-api)", async () => {
     const res = await fetch(`${baseUrl}/anomalies`);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as Array<Record<string, any>>;
-    const real = body.find((a) => a.meter_id === "M-109");
+    const body = (await res.json()) as { items: Array<Record<string, any>> };
+    const real = body.items.find((a) => a.meter_id === "M-109");
     expect(real).toBeDefined();
     expect(real!.type).toBe("REAL_ANOMALY");
     expect(real!.severity).toBe("HIGH");
@@ -209,8 +213,8 @@ describe("E2E pipeline on real seeded data (spec analysis-pipeline)", () => {
 
   test("GET /anomalies/:id exposes the 4 explanations (toggle simple/técnica)", async () => {
     const res = await fetch(`${baseUrl}/anomalies`);
-    const body = (await res.json()) as Array<Record<string, any>>;
-    const real = body.find((a) => a.meter_id === "M-109");
+    const body = (await res.json()) as { items: Array<Record<string, any>> };
+    const real = body.items.find((a) => a.meter_id === "M-109");
     expect(real).toBeDefined();
 
     const detailRes = await fetch(`${baseUrl}/anomalies/${real!.id}`);

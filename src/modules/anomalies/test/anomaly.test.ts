@@ -127,10 +127,10 @@ describe("GET /anomalies", () => {
   test("returns the 4 fixture anomalies with type/severity per spec scenario", async () => {
     const res = await fetch(`${server.baseUrl}/anomalies`);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as Array<Record<string, any>>;
-    expect(body).toHaveLength(4);
+    const body = (await res.json()) as { items: Array<Record<string, any>> };
+    expect(body.items).toHaveLength(4);
 
-    const byMeter = new Map(body.map((a) => [a.meter_id, a]));
+    const byMeter = new Map(body.items.map((a) => [a.meter_id, a]));
     expect(byMeter.get("M-ZZ1")!.type).toBe("REAL_ANOMALY");
     expect(byMeter.get("M-ZZ1")!.severity).toBe("HIGH");
     expect(byMeter.get("M-ZZ2")!.type).toBe("FALSE_POSITIVE");
@@ -148,18 +148,20 @@ describe("GET /anomalies", () => {
   test("returns [] when filtering by a status with no matches", async () => {
     const res = await fetch(`${server.baseUrl}/anomalies?status=RESOLVED`);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as unknown[];
-    expect(body).toHaveLength(0);
+    const body = (await res.json()) as { items: unknown[] };
+    expect(body.items).toHaveLength(0);
   });
 
   test("filters by severity and combined status+severity", async () => {
-    const high = (await (await fetch(`${server.baseUrl}/anomalies?severity=HIGH`)).json()) as any[];
-    expect(high).toHaveLength(2);
+    const high = (await (await fetch(`${server.baseUrl}/anomalies?severity=HIGH`)).json()) as {
+      items: unknown[];
+    };
+    expect(high.items).toHaveLength(2);
 
     const openHigh = (await (
       await fetch(`${server.baseUrl}/anomalies?status=OPEN&severity=HIGH`)
-    ).json()) as any[];
-    expect(openHigh).toHaveLength(2);
+    ).json()) as { items: unknown[] };
+    expect(openHigh.items).toHaveLength(2);
   });
 
   test("returns 400 VALIDATION_ERROR for an unknown severity filter", async () => {
@@ -167,6 +169,143 @@ describe("GET /anomalies", () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as Record<string, any>;
     expect(body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  test("exposes the paginated envelope with defaults (page=1, page_size=20)", async () => {
+    const res = await fetch(`${server.baseUrl}/anomalies`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, any>;
+    expect(body.total).toBe(4);
+    expect(body.page).toBe(1);
+    expect(body.page_size).toBe(20);
+    expect(body.has_more).toBe(false);
+    expect(Array.isArray(body.items)).toBe(true);
+  });
+
+  test("filters by type", async () => {
+    const real = (await (await fetch(`${server.baseUrl}/anomalies?type=REAL_ANOMALY`)).json()) as {
+      items: Array<Record<string, any>>;
+      total: number;
+    };
+    expect(real.total).toBe(1);
+    expect(real.items.map((a) => a.meter_id)).toEqual(["M-ZZ1"]);
+
+    const fp = (await (await fetch(`${server.baseUrl}/anomalies?type=FALSE_POSITIVE`)).json()) as {
+      items: Array<Record<string, any>>;
+      total: number;
+    };
+    expect(fp.total).toBe(1);
+    expect(fp.items.map((a) => a.meter_id)).toEqual(["M-ZZ2"]);
+  });
+
+  test("filters by meter_id using the public meter CODE (not the internal FK)", async () => {
+    const byCode = (await (
+      await fetch(`${server.baseUrl}/anomalies?meter_id=M-ZZ2`)
+    ).json()) as { items: Array<Record<string, any>>; total: number };
+    expect(byCode.total).toBe(1);
+    expect(byCode.items[0]!.type).toBe("FALSE_POSITIVE");
+
+    const noMatch = (await (
+      await fetch(`${server.baseUrl}/anomalies?meter_id=M-ZZ9`)
+    ).json()) as { items: unknown[]; total: number };
+    expect(noMatch.total).toBe(0);
+    expect(noMatch.items).toHaveLength(0);
+  });
+
+  test("combined status+severity+type filters shrink total", async () => {
+    const res = await fetch(
+      `${server.baseUrl}/anomalies?status=OPEN&severity=HIGH&type=REAL_ANOMALY`,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: Array<Record<string, any>>; total: number };
+    expect(body.total).toBe(1);
+    expect(body.items[0]!.meter_id).toBe("M-ZZ1");
+  });
+
+  test.each([
+    ["page=0", "page=0"],
+    ["page_size=0", "page_size=0"],
+    ["page_size=101", "page_size=101"],
+    ["type=bogus", "type=bogus"],
+  ])("returns 400 VALIDATION_ERROR for invalid param %s", async (_label, query) => {
+    const res = await fetch(`${server.baseUrl}/anomalies?${query}`);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as Record<string, any>;
+    expect(body.error.code).toBe("VALIDATION_ERROR");
+  });
+});
+
+describe("GET /anomalies pagination (slicing)", () => {
+  // 4 del fixture + 21 extras = 25 → página 1 (default 20) = 20 items,
+  // página 2 = 5 items; has_more true/false respectivamente.
+  let extraIds: string[] = [];
+
+  beforeAll(async () => {
+    const meterByCode = new Map(
+      (
+        await prisma.meter.findMany({ where: { meterId: { in: FIXTURE_METERS } } })
+      ).map((m) => [m.meterId, m.id]),
+    );
+    const base = {
+      analysisRunId: runId,
+      detectedAt: new Date("2026-09-10T10:00:00.000Z"),
+      rangeStart: new Date("2026-09-08T10:00:00.000Z"),
+      rangeEnd: new Date("2026-09-10T12:00:00.000Z"),
+      confidence: 0.8,
+      status: "OPEN" as const,
+      type: "REAL_ANOMALY" as const,
+      severity: "LOW" as const,
+      detectionType: "SPIKE" as const,
+      signals: { max_z: 2 },
+    };
+    const created = await prisma.$transaction(
+      Array.from({ length: 21 }, (_, i) =>
+        prisma.anomaly.create({
+          data: {
+            ...base,
+            meterId: meterByCode.get(FIXTURE_METERS[i % FIXTURE_METERS.length]!)!,
+            detectedAt: new Date(base.detectedAt.getTime() + i * 3_600_000),
+          },
+        }),
+      ),
+    );
+    extraIds = created.map((a) => a.id);
+  });
+
+  afterAll(async () => {
+    if (extraIds.length > 0) {
+      await prisma.anomaly.deleteMany({ where: { id: { in: extraIds } } });
+    }
+  });
+
+  test("page 1 with default page_size 20 slices 20 items and has_more true", async () => {
+    const res = await fetch(`${server.baseUrl}/anomalies`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, any>;
+    expect(body.total).toBe(25);
+    expect(body.items).toHaveLength(20);
+    expect(body.page).toBe(1);
+    expect(body.page_size).toBe(20);
+    expect(body.has_more).toBe(true);
+  });
+
+  test("page 2 returns the remaining 5 items and has_more false", async () => {
+    const res = await fetch(`${server.baseUrl}/anomalies?page=2`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, any>;
+    expect(body.total).toBe(25);
+    expect(body.items).toHaveLength(5);
+    expect(body.page).toBe(2);
+    expect(body.has_more).toBe(false);
+  });
+
+  test("page 3 is empty with has_more false", async () => {
+    const res = await fetch(`${server.baseUrl}/anomalies?page=3`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, any>;
+    expect(body.items).toHaveLength(0);
+    expect(body.total).toBe(25);
+    expect(body.has_more).toBe(false);
   });
 });
 

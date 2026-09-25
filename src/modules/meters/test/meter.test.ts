@@ -58,7 +58,7 @@ describe("GET /meters", () => {
 });
 
 describe("GET /meters/:meterId", () => {
-  test("returns baseline stats, current reading and 336-item history for M-109", async () => {
+  test("returns baseline stats and current reading for M-109 (no history)", async () => {
     const res = await fetch(`${server.baseUrl}/meters/M-109`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, any>;
@@ -74,24 +74,19 @@ describe("GET /meters/:meterId", () => {
     expect(body.current.timestamp).toBe("2026-09-14T23:00:00.000Z");
     expect(body.variation_pct).toBeCloseTo(98.8, 0);
 
-    expect(body.history).toHaveLength(336);
-    expect(body.history[0].timestamp).toBe("2026-09-01T00:00:00.000Z");
-    expect(body.history[335].timestamp).toBe("2026-09-14T23:00:00.000Z");
-    for (let i = 1; i < body.history.length; i++) {
-      const prev = new Date(body.history[i - 1].timestamp).getTime();
-      const curr = new Date(body.history[i].timestamp).getTime();
-      expect(curr >= prev).toBe(true);
-    }
+    // Contrato actual: el detalle NO expone `history`; el frontend carga las
+    // lecturas paginadas vía GET /meters/:meterId/readings.
+    expect("history" in body).toBe(false);
   });
 
-  test("returns null current/baseline and empty history for a meter without readings", async () => {
+  test("returns null current/baseline for a meter without readings (no history)", async () => {
     const res = await fetch(`${server.baseUrl}/meters/M-ZZ0`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, any>;
     expect(body.current).toBeNull();
     expect(body.baseline.consumption_kwh.mean).toBeNull();
     expect(body.variation_pct).toBeNull();
-    expect(body.history).toEqual([]);
+    expect("history" in body).toBe(false);
   });
 
   test("returns 404 NOT_FOUND for an unknown meter", async () => {

@@ -59,12 +59,5 @@ export function createMeterRepository(prisma: PrismaClient): MeterRepository {
       }
       return windows;
     },
-
-    async history(meterId: string): Promise<Reading[]> {
-      return prisma.reading.findMany({
-        where: { meter: { meterId } },
-        orderBy: { timestamp: "asc" },
-      });
-    },
   };
 }

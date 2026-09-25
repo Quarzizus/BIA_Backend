@@ -46,11 +46,14 @@ describe("createApp wiring", () => {
 
     const readings = await fetch(`${baseUrl}/meters/M-109/readings?from=2026-09-12T13:00:00Z&to=2026-09-12T15:00:00Z`);
     expect(readings.status).toBe(200);
-    expect(((await readings.json()) as unknown[]).length).toBe(3);
+    const readingsBody = (await readings.json()) as { items: unknown[] };
+    expect(readingsBody.items.length).toBe(3);
 
     const anomalies = await fetch(`${baseUrl}/anomalies`);
     expect(anomalies.status).toBe(200);
-    expect(Array.isArray(await anomalies.json())).toBe(true);
+    const anomaliesBody = (await anomalies.json()) as { items: unknown[]; total: number };
+    expect(Array.isArray(anomaliesBody.items)).toBe(true);
+    expect(anomaliesBody.items.length).toBe(anomaliesBody.total);
 
     const dashboard = await fetch(`${baseUrl}/dashboard/summary`);
     expect(dashboard.status).toBe(200);

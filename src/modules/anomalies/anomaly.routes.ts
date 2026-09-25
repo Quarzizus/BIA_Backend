@@ -13,7 +13,19 @@ export function createAnomaliesRouter(prisma: PrismaClient): Router {
     if (!query.success) {
       throw new ApiError(400, "VALIDATION_ERROR", formatZodIssues(query.error));
     }
-    res.json(await service.list(query.data));
+    // El query usa snake_case (contrato API); el dominio usa `meterCode` y
+    // `pageSize` (camelCase) para dejar claro qué es cada campo.
+    res.json(
+      await service.list({
+        status: query.data.status,
+        severity: query.data.severity,
+        sort: query.data.sort,
+        type: query.data.type,
+        meterCode: query.data.meter_id,
+        page: query.data.page,
+        pageSize: query.data.page_size,
+      }),
+    );
   });
 
   router.get("/:id", async (req, res) => {

@@ -19,6 +19,14 @@ export interface AnomalyFilters {
   severity?: Severity;
   /** Orden de la lista: `priority` (score descendente, por defecto) o `detected_at` (cronológico descendente). */
   sort?: "priority" | "detected_at";
+  /** Filtra por tipo de anomalía. */
+  type?: AnomalyType;
+  /** Filtra por el CÓDIGO público del medidor (`meter.meterId`); se usa `meterCode` para no confundirlo con el FK interno `Meter.id`. */
+  meterCode?: string;
+  /** Página solicitada (1-indexada). */
+  page: number;
+  /** Tamaño de página (anomalías: 1..100). */
+  pageSize: number;
 }
 
 export interface AnomalyListItem {
@@ -82,8 +90,16 @@ export interface AnomalyRow {
   analysisRunId: string;
 }
 
+export interface AnomalyListResponse {
+  items: AnomalyListItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  has_more: boolean;
+}
+
 export interface AnomalyService {
-  list(filters: AnomalyFilters): Promise<AnomalyListItem[]>;
+  list(filters: AnomalyFilters): Promise<AnomalyListResponse>;
   detail(id: string): Promise<AnomalyDetail>;
   updateStatus(id: string, status: AnomalyStatus): Promise<AnomalyDetail>;
 }
