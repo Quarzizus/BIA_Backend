@@ -1,4 +1,4 @@
-import type { PrismaClient } from "../../generated/prisma/client";
+import type { AnalysisRun, PrismaClient } from "../../generated/prisma/client";
 import type { DashboardRepository } from "./dashboard.domain";
 
 /**
@@ -42,6 +42,10 @@ export function createDashboardRepository(prisma: PrismaClient): DashboardReposi
         orderBy: { detectedAt: "desc" },
         include: { meter: { select: { meterId: true } } },
       });
+    },
+
+    async lastAnalysis(): Promise<AnalysisRun | null> {
+      return prisma.analysisRun.findFirst({ orderBy: { startedAt: "desc" } });
     },
   };
 }

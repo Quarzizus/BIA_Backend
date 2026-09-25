@@ -125,6 +125,18 @@ describe("GET /dashboard/summary", () => {
     expect(body.severity_counts.LOW).toBe(1);
   });
 
+  test("last_analysis expone fecha/hora y estado del run más reciente (KPI dashboard)", async () => {
+    const body = (await (await fetch(`${server.baseUrl}/dashboard/summary`)).json()) as Record<string, any>;
+    expect(body.last_analysis).not.toBeNull();
+    expect(body.last_analysis.id).toBe(runId);
+    expect(body.last_analysis.status).toBe("COMPLETED");
+    expect(body.last_analysis.started_at).toBeDefined();
+    expect(body.last_analysis).toHaveProperty("completed_at");
+    expect(body.last_analysis).toHaveProperty("anomaly_count");
+    // El run del fixture es global (sin scope) → meter_id null.
+    expect(body.last_analysis.meter_id).toBeNull();
+  });
+
   test("recent_anomalies includes the open critical anomaly with full fields", async () => {
     const body = (await (await fetch(`${server.baseUrl}/dashboard/summary`)).json()) as Record<string, any>;
     const mine = (body.recent_anomalies as any[]).find(

@@ -139,6 +139,10 @@ model AnalysisRun {
   // "llm_cached" (textos LLM reutilizados sin llamada), "rules" (fallback por
   // reglas) o null (run RUNNING/FAILED o sin hallazgos).
   explanationSource String?
+  // Alcance del run: código del medidor (columna `meterId`) cuando el análisis
+  // fue POR MEDIDOR (?meter_id=M-109); null = análisis global (todos los
+  // medidores). Se persiste al crear el run, al arrancar.
+  meterId         String?
   startedAt   DateTime       @default(now())
   completedAt DateTime?
   anomalies   Anomaly[]

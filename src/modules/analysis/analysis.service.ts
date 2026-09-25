@@ -82,6 +82,8 @@ export interface AnalysisRunStatus {
   refreshed_anomalies: number;
   /** Origen de las explicaciones (null mientras RUNNING/FAILED o sin hallazgos). */
   explanation_source: ExplanationSource | null;
+  /** Alcance del run: código del medidor si fue por medidor (?meter_id=), null si global. */
+  meter_id: string | null;
   /** Backward compat: true si el LLM fue llamado en este run (caché → false). */
   llm_used: boolean;
   started_at: string;
@@ -397,7 +399,9 @@ export function createAnalysisService(
           }
         }
       }
-      const run = await repository.createRun();
+      const run = await repository.createRun(
+        options.meterCodes && options.meterCodes.length === 1 ? options.meterCodes[0] : undefined,
+      );
       // Ejecución asíncrona desacoplada: responder 202 primero, luego correr el pipeline.
       void this.runAnalysis(run.id, options).catch((err) => {
         logger.error("analysis run crashed outside FAILED handler", {
@@ -439,6 +443,7 @@ export function createAnalysisService(
         new_anomalies: run.newCount,
         refreshed_anomalies: run.refreshedCount,
         explanation_source: run.explanationSource as ExplanationSource | null,
+        meter_id: run.meterId ?? null,
         llm_used: run.llmUsed,
         started_at: run.startedAt.toISOString(),
         completed_at: run.completedAt?.toISOString() ?? null,

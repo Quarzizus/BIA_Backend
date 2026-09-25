@@ -983,6 +983,7 @@ describe("start({ meterCodes }) — análisis por medidor", () => {
     expect(status.new_anomalies).toBe(1);
     expect(status.refreshed_anomalies).toBe(0);
     expect(status.summary).toContain("1 meter(s)");
+    expect(status.meter_id).toBe("M-PZ1");
 
     const rows = await prisma.anomaly.findMany({
       where: { analysisRunId: id },

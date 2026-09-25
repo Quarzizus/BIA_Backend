@@ -905,6 +905,29 @@ components:
           type: string
           format: date-time
 
+    LastAnalysis:
+      type: object
+      description: Último análisis ejecutado (KPI dashboard — fecha/hora y estado, sin datos completos)
+      required: [id, status, started_at, completed_at, anomaly_count, meter_id]
+      properties:
+        id:
+          type: string
+        status:
+          $ref: "#/components/schemas/AnalysisStatus"
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        anomaly_count:
+          type: integer
+          description: Anomalías detectadas en ese run (nuevas + refrescadas)
+        meter_id:
+          type: [string, "null"]
+          description: Alcance del run — código del medidor si fue por medidor (?meter_id=), null si global
+
     OpenBySeverity:
       type: object
       description: Anomalías abiertas agrupadas por severidad
@@ -926,6 +949,7 @@ components:
         - open_by_severity
         - severity_counts
         - recent_anomalies
+        - last_analysis
       properties:
         total_consumption:
           type: number
@@ -946,6 +970,9 @@ components:
           description: Anomalías abiertas más recientes (máx. 5)
           items:
             $ref: "#/components/schemas/RecentAnomaly"
+        last_analysis:
+          $ref: "#/components/schemas/LastAnalysis"
+          description: Último análisis ejecutado (fecha/hora y estado) — null si nunca se ha corrido uno
 
     AnalysisStatus:
       type: string
@@ -961,6 +988,7 @@ components:
         - new_anomalies
         - refreshed_anomalies
         - explanation_source
+        - meter_id
         - llm_used
         - started_at
         - completed_at
@@ -987,11 +1015,12 @@ components:
           enum: [llm, llm_cached, rules, "null"]
           description: |
             Origen de las explicaciones del run; null mientras el run está
-            RUNNING/FAILED o si no hubo hallazgos:
-            - `llm`: el LLM fue llamado y respondió en este run.
-            - `llm_cached`: no hubo llamada al LLM; los textos se reutilizaron
-              de anomalías previas originadas por el LLM con evidencia idéntica.
-            - `rules`: explicaciones de fallback generadas por reglas.
+            RUNNING/FAILED o si no hubo hallazgos. `llm` = LLM llamado en este
+            run; `llm_cached` = textos LLM reutilizados sin llamada; `rules` =
+            explicaciones generadas por reglas (proveedor caído).
+        meter_id:
+          type: [string, "null"]
+          description: Alcance del run — código del medidor si fue un análisis por medidor (?meter_id=), null si fue global (todos los medidores)
         llm_used:
           type: boolean
           description: "Legacy: true si el LLM participó en la clasificación/explicación este run (caché → false). Preferir `explanation_source`."

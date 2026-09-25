@@ -53,7 +53,8 @@ export interface PipelineData {
 }
 
 export interface AnalysisRepository {
-  createRun(): Promise<{ id: string; status: string }>;
+  /** Crea el run RUNNING con lock 'single'; `meterCode` opcional registra un análisis por medidor. */
+  createRun(meterCode?: string): Promise<{ id: string; status: string }>;
   findRun(runId: string): Promise<AnalysisRun | null>;
   loadPipelineData(): Promise<PipelineData>;
   /** ¿Existe un medidor con ese código (columna `meterId`)? — para validar análisis por medidor. */
@@ -128,9 +129,9 @@ function stableStringify(value: unknown): string {
 
 export function createAnalysisRepository(prisma: PrismaClient): AnalysisRepository {
   return {
-    async createRun() {
+    async createRun(meterCode?: string) {
       const run = await prisma.analysisRun.create({
-        data: { status: "RUNNING", lockToken: "single" },
+        data: { status: "RUNNING", lockToken: "single", meterId: meterCode ?? null },
       });
       return { id: run.id, status: run.status };
     },
