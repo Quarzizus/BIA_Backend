@@ -3,7 +3,7 @@ import type { PrismaClient } from "../../generated/prisma/client";
 import { ApiError } from "../../shared/errors";
 import { createAnalysisService, type AnalysisDeps, type AnalysisService } from "./analysis.service";
 import type { LlmClient } from "./llm/analysis.llm.client";
-import { analysisIdParam } from "./analysis.model";
+import { analysisIdParam, analyzeQuery } from "./analysis.model";
 
 export interface AnalysisRouterDeps extends AnalysisDeps {
   llm: LlmClient;
@@ -24,10 +24,16 @@ export function createAnalysisRouter(
   const router = Router();
   const service: AnalysisService = createAnalysisService(prisma, deps.llm, deps);
 
-  router.post("/analyze", async (_req, res) => {
+  router.post("/analyze", async (req, res) => {
     // Fail-fast ante mala configuración del LLM (spec ai-integration): sin
     // fallback silencioso — service.start() lanza 503 AI_NOT_CONFIGURED.
-    const run = await service.start();
+    // `?meter_id=M-109` opcional: el run analiza SOLO ese medidor.
+    const query = analyzeQuery.safeParse(req.query);
+    if (!query.success) {
+      throw new ApiError(400, "VALIDATION_ERROR", query.error.message);
+    }
+    const options = query.data.meter_id ? { meterCodes: [query.data.meter_id] } : undefined;
+    const run = await service.start(options);
     res.status(202).json({ analysis_id: run.id });
   });
 

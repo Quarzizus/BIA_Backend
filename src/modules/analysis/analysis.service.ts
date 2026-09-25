@@ -89,7 +89,7 @@ export interface AnalysisRunStatus {
 }
 
 export interface AnalysisService {
-  start(): Promise<{ id: string; status: string }>;
+  start(options?: { meterCodes?: string[] }): Promise<{ id: string; status: string }>;
   runAnalysis(runId: string, options?: { meterCodes?: string[] }): Promise<void>;
   getStatus(runId: string): Promise<AnalysisRunStatus>;
 }
@@ -386,11 +386,20 @@ export function createAnalysisService(
   }
 
   return {
-    async start() {
+    async start(options: { meterCodes?: string[] } = {}) {
       assertConfigured();
+      // Análisis por medidor: validar existencia antes de crear el run (404
+      // claro en vez de un run que termina con 0 anomalías).
+      if (options.meterCodes) {
+        for (const code of options.meterCodes) {
+          if (!(await repository.meterExistsByCode(code))) {
+            throw new ApiError(404, "NOT_FOUND", `Meter ${code} not found`);
+          }
+        }
+      }
       const run = await repository.createRun();
       // Ejecución asíncrona desacoplada: responder 202 primero, luego correr el pipeline.
-      void this.runAnalysis(run.id).catch((err) => {
+      void this.runAnalysis(run.id, options).catch((err) => {
         logger.error("analysis run crashed outside FAILED handler", {
           runId: run.id,
           error: err instanceof Error ? err.message : String(err),

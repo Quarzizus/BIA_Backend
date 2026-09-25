@@ -241,7 +241,17 @@ paths:
       description: |
         Crea un run de análisis y responde 202 inmediatamente; el pipeline corre
         en segundo plano. Solo puede haber un run en curso a la vez.
+        `?meter_id=M-109` (opcional) limita el análisis a UN medidor; sin el
+        parámetro se analizan todos.
       operationId: startAnalysis
+      parameters:
+        - name: meter_id
+          in: query
+          required: false
+          description: Código del medidor a analizar en solitario (ej. M-109). Sin él, se analizan todos los medidores.
+          schema:
+            type: string
+            example: M-109
       responses:
         "202":
           description: Run de análisis creado
@@ -249,6 +259,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AnalysisAccepted"
+        "404":
+          description: El medidor indicado en `meter_id` no existe
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  code: NOT_FOUND
+                  message: Meter M-999 not found
         "409":
           description: Ya hay un análisis en curso
           content:

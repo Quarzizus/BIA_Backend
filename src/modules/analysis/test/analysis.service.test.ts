@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { createAnalysisService, type AnalysisService } from "../analysis.service";
+import { createAnalysisService, type AnalysisRunStatus, type AnalysisService } from "../analysis.service";
 import type { LlmClient } from "../llm/analysis.llm.client";
 import {
   createTestPrisma,
@@ -959,5 +959,43 @@ describe("runAnalysis pipeline", () => {
     await prisma.anomaly.deleteMany({ where: { meterId: meter.id } });
     await prisma.reading.deleteMany({ where: { meterId: meter.id } });
     await prisma.meter.delete({ where: { id: meter.id } });
+  });
+});
+
+describe("start({ meterCodes }) — análisis por medidor", () => {
+  /** Espera a que el run async (disparado por start) complete. */
+  async function waitCompleted(runId: string): Promise<AnalysisRunStatus> {
+    for (let i = 0; i < 50; i++) {
+      const status = await service.getStatus(runId);
+      if (status.status === "COMPLETED" || status.status === "FAILED") return status;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error("run did not complete in time");
+  }
+
+  test("con meterCodes el run solo produce anomalías de ESE medidor", async () => {
+    await clearOpenAnomalies();
+    const { id } = await service.start({ meterCodes: ["M-PZ1"] });
+    createdRunIds.push(id);
+
+    const status = await waitCompleted(id);
+    expect(status.anomaly_count).toBe(1);
+    expect(status.new_anomalies).toBe(1);
+    expect(status.refreshed_anomalies).toBe(0);
+    expect(status.summary).toContain("1 meter(s)");
+
+    const rows = await prisma.anomaly.findMany({
+      where: { analysisRunId: id },
+      include: { meter: { select: { meterId: true } } },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.meter!.meterId).toBe("M-PZ1");
+  });
+
+  test("meterCodes con un medidor inexistente → 404 antes de crear el run", async () => {
+    await expect(service.start({ meterCodes: ["M-NOPE"] })).rejects.toMatchObject({
+      status: 404,
+      code: "NOT_FOUND",
+    });
   });
 });

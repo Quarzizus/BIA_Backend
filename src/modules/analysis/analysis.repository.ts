@@ -56,6 +56,8 @@ export interface AnalysisRepository {
   createRun(): Promise<{ id: string; status: string }>;
   findRun(runId: string): Promise<AnalysisRun | null>;
   loadPipelineData(): Promise<PipelineData>;
+  /** ¿Existe un medidor con ese código (columna `meterId`)? — para validar análisis por medidor. */
+  meterExistsByCode(meterCode: string): Promise<boolean>;
   findEvent(
     meterId: string,
     eventTimestamp: Date,
@@ -135,6 +137,14 @@ export function createAnalysisRepository(prisma: PrismaClient): AnalysisReposito
 
     async findRun(runId) {
       return prisma.analysisRun.findUnique({ where: { id: runId } });
+    },
+
+    async meterExistsByCode(meterCode) {
+      const meter = await prisma.meter.findFirst({
+        where: { meterId: meterCode },
+        select: { id: true },
+      });
+      return meter !== null;
     },
 
     async loadPipelineData() {
