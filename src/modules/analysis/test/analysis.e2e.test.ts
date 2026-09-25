@@ -49,6 +49,7 @@ const VALID_ENV = {
 let baseUrl: string;
 let server: import("node:http").Server;
 const CLEAN_METERS = ["M-101", "M-102", "M-103", "M-105", "M-107", "M-108", "M-110", "M-111"];
+const GROUND_TRUTH_METERS = ["M-109", "M-104", "M-106", "M-112"];
 
 async function waitForCompletion(runId: string, timeoutMs = 15000): Promise<Record<string, any>> {
   const deadline = Date.now() + timeoutMs;
@@ -64,6 +65,12 @@ async function waitForCompletion(runId: string, timeoutMs = 15000): Promise<Reco
 beforeAll(async () => {
   await provisionTestDb("bia_test_analysis");
   await seedTestDb(prisma);
+  // Caché de evidencia limpia: sin anomalías OPEN previas de los ground truths,
+  // el run de esta invocación SÍ usa el LLM (llm_used=true) y no reutiliza
+  // textos de una ejecución anterior del archivo.
+  await prisma.anomaly.deleteMany({
+    where: { meter: { meterId: { in: GROUND_TRUTH_METERS } } },
+  });
   const app = createApp(prisma, { analysis: { ...VALID_ENV, llm: fakeLlm() } });
   server = app.listen(0);
   await new Promise<void>((resolve) => server.once("listening", resolve));

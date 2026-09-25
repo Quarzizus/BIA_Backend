@@ -45,6 +45,17 @@ function createFakeLlm(overrides?: Partial<LlmClient>): LlmClient {
 let service: AnalysisService;
 const createdRunIds: string[] = [];
 
+/**
+ * Limpia las anomalías OPEN del fixture: cada test que necesita un run "de
+ * verdad" (LLM o fallback) parte con el caché de evidencia vacío. Las RESOLVED
+ * quedan intactas (son historial y no entran en el set activo).
+ */
+async function clearOpenAnomalies(): Promise<void> {
+  await prisma.anomaly.deleteMany({
+    where: { meter: { meterId: { in: FIXTURE_METERS } }, status: "OPEN" },
+  });
+}
+
 beforeAll(async () => {
   await provisionTestDb("bia_test_analysis");
   await seedTestDb(prisma);
@@ -145,6 +156,8 @@ afterAll(async () => {
 
 describe("runAnalysis pipeline", () => {
   test("creates one consolidated anomaly per affected meter with correct classification", async () => {
+    // Caché de evidencia vacío: este run SÍ usa el LLM (llm_used=true).
+    await clearOpenAnomalies();
     // Se crea el run RUNNING directamente (start() también dispararía un runner
     // desacoplado que competiría con este runAnalysis explícito en los tests).
     const run = await prisma.analysisRun.create({
@@ -195,39 +208,48 @@ describe("runAnalysis pipeline", () => {
     }
   });
 
-  test("completes the run with rule-based fallback explanations when the LLM fails", async () => {
+  test("LLM down: fallback texts are persisted and REUSED on a second run (cache + fallback)", async () => {
+    // Estado limpio: sin anomalías OPEN previas, el fallback se produce de verdad.
+    await clearOpenAnomalies();
+
+    let explainCalls = 0;
     const failing = createAnalysisService(
       prisma,
       createFakeLlm({
         async explain() {
+          explainCalls++;
           throw new Error("provider 500");
         },
       }),
       { AI_API_KEY: "test-key", AI_BASE_URL: "https://fake/v1", AI_MODEL: "test" },
     );
-    const run = await prisma.analysisRun.create({
+
+    // Run 1: el LLM falla en los 4 medidores → explicaciones por reglas.
+    const run1 = await prisma.analysisRun.create({
       data: { status: "RUNNING", lockToken: "single" },
     });
-    createdRunIds.push(run.id);
-    await failing.runAnalysis(run.id, { meterCodes: FIXTURE_METERS });
+    createdRunIds.push(run1.id);
+    await failing.runAnalysis(run1.id, { meterCodes: FIXTURE_METERS });
+    expect(explainCalls).toBe(4);
 
-    const after = await prisma.analysisRun.findUnique({ where: { id: run.id } });
+    const after1 = await prisma.analysisRun.findUnique({ where: { id: run1.id } });
     // El run COMPLETA con llm_used=false: el fallback por reglas preserva el resultado.
-    expect(after!.status).toBe("COMPLETED");
-    expect(after!.llmUsed).toBe(false);
-    expect(after!.lockToken).toBeNull();
-    expect(after!.summary).toContain("Detected 4");
+    expect(after1!.status).toBe("COMPLETED");
+    expect(after1!.llmUsed).toBe(false);
+    expect(after1!.lockToken).toBeNull();
+    expect(after1!.summary).toContain("Detected 4");
 
-    const anomalies = await prisma.anomaly.findMany({
-      where: { analysisRunId: run.id },
+    const anomalies1 = await prisma.anomaly.findMany({
+      where: { analysisRunId: run1.id },
       include: { meter: true },
+      orderBy: { meter: { meterId: "asc" } },
     });
-    expect(anomalies).toHaveLength(4);
+    expect(anomalies1).toHaveLength(4);
     // Cada anomalía conserva su clasificación determinista con explicación por reglas
     // siguiendo el mismo contrato de formato que el LLM: reason en 2 párrafos
     // separados por línea en blanco y recommended_action con bullets "- ".
     // El fallback también genera la versión simple (contrato dual).
-    for (const anomaly of anomalies) {
+    for (const anomaly of anomalies1) {
       expect(anomaly.reason).toContain("por reglas");
       expect(anomaly.reason).toContain(anomaly.type);
       expect(anomaly.reason).toContain("\n\n");
@@ -238,9 +260,37 @@ describe("runAnalysis pipeline", () => {
       expect(anomaly.recommendedActionSimple!.startsWith("- ")).toBe(true);
       expect(anomaly.recommendedActionSimple!.length).toBeGreaterThan(0);
     }
+
+    // Run 2 (misma data, LLM sigue caído): el caché reutiliza los textos del
+    // fallback persistido en run 1 — 0 llamadas nuevas al LLM.
+    const run2 = await prisma.analysisRun.create({
+      data: { status: "RUNNING", lockToken: "single" },
+    });
+    createdRunIds.push(run2.id);
+    await failing.runAnalysis(run2.id, { meterCodes: FIXTURE_METERS });
+    expect(explainCalls).toBe(4);
+
+    const after2 = await prisma.analysisRun.findUnique({ where: { id: run2.id } });
+    expect(after2!.status).toBe("COMPLETED");
+    expect(after2!.llmUsed).toBe(false);
+
+    const anomalies2 = await prisma.anomaly.findMany({
+      where: { analysisRunId: run2.id },
+      include: { meter: true },
+      orderBy: { meter: { meterId: "asc" } },
+    });
+    expect(anomalies2).toHaveLength(4);
+    expect(anomalies2.map((a) => a.id)).toEqual(anomalies1.map((a) => a.id));
+    // Reutilización: los textos por reglas del run 1 se conservan sin llamar al LLM.
+    for (const anomaly of anomalies2) {
+      expect(anomaly.reason).toContain("por reglas");
+      expect(anomaly.reasonSimple).toContain("asistente automático");
+    }
   });
 
   test("an LLM failure on ONE meter does not erase the other meters' findings", async () => {
+    // Caché vacío: el run ejerce el LLM en los medidores sanos y el fallback en M-PZ1.
+    await clearOpenAnomalies();
     const partial = createAnalysisService(
       prisma,
       createFakeLlm({
@@ -285,6 +335,8 @@ describe("runAnalysis pipeline", () => {
   });
 
   test("persisted anomalies from the LLM path are normalized (wall-of-text input)", async () => {
+    // Caché vacío para M-PZ1: la fila previa (textos por reglas) no debe reutilizarse.
+    await clearOpenAnomalies();
     // El LLM falso ignora el contrato de formato: reason en un muro de texto
     // sin párrafos y recommended_action numerada. El normalizador del servicio
     // debe garantizar el formato canónico ANTES de persistir.
@@ -432,14 +484,48 @@ describe("runAnalysis pipeline", () => {
     await prisma.meter.delete({ where: { id: meter.id } });
   });
 
-  test("a second run REFRESHES the same OPEN anomalies instead of duplicating them", async () => {
-    // Upsert por (meter + type + status=OPEN): el segundo run sobre los mismos
-    // hallazgos debe ACTUALIZAR las 4 filas, no crear 4 nuevas.
+  test("cache hit on second run: same evidence reuses LLM texts with ZERO new calls", async () => {
+    // Caché vacío: el run 1 ejerce el LLM (4 llamadas) y persiste sus textos.
+    await clearOpenAnomalies();
+
+    const calls = { classify: 0, explain: 0 };
+    const countingLlm = createFakeLlm({
+      async classify() {
+        calls.classify++;
+        return {
+          type: "REAL_ANOMALY",
+          severity: "HIGH",
+          reason: "Caso límite clasificado por el modelo.",
+          recommended_action: "Revisar manualmente.",
+          reason_simple: "El consumo subió de forma notoria.",
+          recommended_action_simple: "Revisa la instalación del medidor.",
+        };
+      },
+      async explain() {
+        calls.explain++;
+        return {
+          reason: "Consumo anómalo detectado por el análisis estadístico.",
+          recommended_action: "Revisar la instalación del medidor.",
+          reason_simple: "El consumo subió de forma notoria. Algo se conectó o se dañó en la instalación.",
+          recommended_action_simple:
+            "Revisa la instalación del medidor. Llama a un electricista si persiste.",
+        };
+      },
+    });
+    const countingService = createAnalysisService(prisma, countingLlm, {
+      AI_API_KEY: "test-key",
+      AI_BASE_URL: "https://fake/v1",
+      AI_MODEL: "test",
+    });
+
     const run1 = await prisma.analysisRun.create({
       data: { status: "RUNNING", lockToken: "single" },
     });
     createdRunIds.push(run1.id);
-    await service.runAnalysis(run1.id, { meterCodes: FIXTURE_METERS });
+    await countingService.runAnalysis(run1.id, { meterCodes: FIXTURE_METERS });
+    // Run 1: 4 llamadas al LLM (una explicación por medidor afectado).
+    expect(calls.explain).toBe(4);
+    expect(calls.classify).toBe(0);
 
     const before = await prisma.anomaly.findMany({
       where: { meter: { meterId: { in: FIXTURE_METERS } } },
@@ -449,43 +535,37 @@ describe("runAnalysis pipeline", () => {
     expect(before).toHaveLength(4);
     expect(before.every((a) => a.status === "OPEN")).toBe(true);
     const idsBefore = before.map((a) => a.id);
+    const reasonsBefore = before.map((a) => a.reason);
 
-    // Segundo run con otro LLM: la explicación cambia → prueba que la fila se refrescó.
-    const secondLlm = createFakeLlm({
-      async explain() {
-        return {
-          reason: "Explicación renovada por el segundo análisis.",
-          recommended_action: "Revisar la instalación del medidor.",
-          reason_simple: "Explicación simple renovada por el segundo análisis.",
-          recommended_action_simple: "Revisa la instalación del medidor. Llama a un electricista.",
-        };
-      },
-    });
-    const secondService = createAnalysisService(prisma, secondLlm, {
-      AI_API_KEY: "test-key",
-      AI_BASE_URL: "https://fake/v1",
-      AI_MODEL: "test",
-    });
     // Garantiza detectedAt estrictamente mayor que el del primer run.
     await new Promise((resolve) => setTimeout(resolve, 5));
     const run2 = await prisma.analysisRun.create({
       data: { status: "RUNNING", lockToken: "single" },
     });
     createdRunIds.push(run2.id);
-    await secondService.runAnalysis(run2.id, { meterCodes: FIXTURE_METERS });
+    await countingService.runAnalysis(run2.id, { meterCodes: FIXTURE_METERS });
 
-    const after = await prisma.anomaly.findMany({
+    // Caché: el LLM NO se llamó en el run 2 (evidencia idéntica) → 0 llamadas nuevas.
+    expect(calls.explain).toBe(4);
+    expect(calls.classify).toBe(0);
+
+    const after = await prisma.analysisRun.findUnique({ where: { id: run2.id } });
+    expect(after!.status).toBe("COMPLETED");
+    expect(after!.llmUsed).toBe(false);
+    expect(after!.lockToken).toBeNull();
+
+    const anomalies = await prisma.anomaly.findMany({
       where: { meter: { meterId: { in: FIXTURE_METERS } } },
       include: { meter: true },
       orderBy: { meter: { meterId: "asc" } },
     });
     // N runs NO acumulan filas: total se mantiene en 4 (una por medidor).
-    expect(after).toHaveLength(4);
-    expect(after.map((a) => a.id)).toEqual(idsBefore);
+    expect(anomalies).toHaveLength(4);
+    expect(anomalies.map((a) => a.id)).toEqual(idsBefore);
 
     // Cada medidor conserva exactamente UNA anomalía OPEN (misma id, refrescada).
     const openByMeter = new Map<string, number>();
-    for (const anomaly of after) {
+    for (const anomaly of anomalies) {
       expect(anomaly.status).toBe("OPEN");
       const code = anomaly.meter!.meterId;
       openByMeter.set(code, (openByMeter.get(code) ?? 0) + 1);
@@ -493,21 +573,115 @@ describe("runAnalysis pipeline", () => {
     expect(openByMeter.size).toBe(4);
     for (const count of openByMeter.values()) expect(count).toBe(1);
 
-    // La fila se REFRESCÓ: analysisRunId del run actual, explicación nueva y detectedAt actualizado.
-    const beforeByMeter = new Map(before.map((a) => [a.meter!.meterId, a]));
-    for (const anomaly of after) {
-      expect(anomaly.analysisRunId).toBe(run2.id);
-      expect(anomaly.reason).toBe("Explicación renovada por el segundo análisis.");
-      // Las versiones simples también se refrescan con el run actual.
-      expect(anomaly.reasonSimple).toBe("Explicación simple renovada por el segundo análisis.");
-      expect(anomaly.detectedAt.getTime()).toBeGreaterThan(
-        beforeByMeter.get(anomaly.meter!.meterId)!.detectedAt.getTime(),
+    // La fila se REFRESCÓ (analysisRunId + detectedAt del run actual) pero los
+    // TEXTOS se reutilizan del run 1: misma razón, misma evidencia.
+    for (let i = 0; i < anomalies.length; i++) {
+      expect(anomalies[i]!.analysisRunId).toBe(run2.id);
+      expect(anomalies[i]!.reason).toBe(reasonsBefore[i]!);
+      expect(anomalies[i]!.detectedAt.getTime()).toBeGreaterThan(
+        before[i]!.detectedAt.getTime(),
       );
     }
 
     // countAnomalies(run2) sigue reportando las 4 (creadas o refrescadas por el run).
-    const status2 = await secondService.getStatus(run2.id);
+    const status2 = await countingService.getStatus(run2.id);
     expect(status2.anomaly_count).toBe(4);
+    expect(status2.llm_used).toBe(false);
+  });
+
+  test("cache miss on changed evidence triggers a new LLM call only for the affected meter", async () => {
+    await clearOpenAnomalies();
+
+    let explainCalls = 0;
+    const countingLlm = createFakeLlm({
+      async explain() {
+        explainCalls++;
+        return {
+          reason: "Consumo anómalo detectado por el análisis estadístico.",
+          recommended_action: "Revisar la instalación del medidor.",
+          reason_simple: "El consumo subió de forma notoria. Algo se conectó o se dañó en la instalación.",
+          recommended_action_simple:
+            "Revisa la instalación del medidor. Llama a un electricista si persiste.",
+        };
+      },
+    });
+    const countingService = createAnalysisService(prisma, countingLlm, {
+      AI_API_KEY: "test-key",
+      AI_BASE_URL: "https://fake/v1",
+      AI_MODEL: "test",
+    });
+
+    const run1 = await prisma.analysisRun.create({
+      data: { status: "RUNNING", lockToken: "single" },
+    });
+    createdRunIds.push(run1.id);
+    await countingService.runAnalysis(run1.id, { meterCodes: FIXTURE_METERS });
+    expect(explainCalls).toBe(4);
+
+    const before = await prisma.anomaly.findMany({
+      where: { meter: { meterId: { in: FIXTURE_METERS } } },
+      include: { meter: true },
+      orderBy: { meter: { meterId: "asc" } },
+    });
+    expect(before).toHaveLength(4);
+    const signalsBefore = new Map(before.map((a) => [a.meter!.meterId, JSON.stringify(a.signals)]));
+    const mPz1Before = before.find((a) => a.meter!.meterId === "M-PZ1")!;
+
+    // Cambia la evidencia de M-PZ1: un día extra de spike MÁS severo (150 vs 110)
+    // → recent_mean/max_z cambian → el fingerprint signals deja de coincidir.
+    const mPz1 = await prisma.meter.findFirst({ where: { meterId: "M-PZ1" } });
+    const extraReadings = [];
+    for (let hour = 0; hour < 24; hour++) {
+      extraReadings.push({
+        meterId: mPz1!.id,
+        timestamp: new Date(Date.UTC(2026, 8, 15, hour, 0, 0)),
+        consumptionKwh: 150,
+        voltageV: 220,
+        currentA: 75,
+        powerFactor: 0.95,
+        status: "ok",
+      });
+    }
+    await prisma.reading.createMany({ data: extraReadings });
+
+    const run2 = await prisma.analysisRun.create({
+      data: { status: "RUNNING", lockToken: "single" },
+    });
+    createdRunIds.push(run2.id);
+    await countingService.runAnalysis(run2.id, { meterCodes: FIXTURE_METERS });
+
+    // Solo M-PZ1 falló el caché (su signals cambió): UNA llamada nueva al LLM.
+    expect(explainCalls).toBe(5);
+
+    const after = await prisma.analysisRun.findUnique({ where: { id: run2.id } });
+    expect(after!.status).toBe("COMPLETED");
+    expect(after!.llmUsed).toBe(true);
+
+    const anomalies = await prisma.anomaly.findMany({
+      where: { meter: { meterId: { in: FIXTURE_METERS } } },
+      include: { meter: true },
+      orderBy: { meter: { meterId: "asc" } },
+    });
+    expect(anomalies).toHaveLength(4);
+    const byMeter = new Map(anomalies.map((a) => [a.meter!.meterId, a]));
+
+    // M-PZ1: nueva evidencia persistida (spike más severo, rango extendido).
+    const mPz1After = byMeter.get("M-PZ1")!;
+    expect(JSON.stringify(mPz1After.signals)).not.toBe(signalsBefore.get("M-PZ1"));
+    expect(mPz1After.rangeEnd.toISOString()).toBe("2026-09-15T23:00:00.000Z");
+    const recentBefore = (
+      mPz1Before.signals as { per_variable: Record<string, { recent_mean: number }> }
+    ).per_variable.consumption_kwh!.recent_mean;
+    const recentAfter = (
+      mPz1After.signals as { per_variable: Record<string, { recent_mean: number }> }
+    ).per_variable.consumption_kwh!.recent_mean;
+    expect(recentAfter).toBeGreaterThan(recentBefore);
+
+    // Los demás medidores acertaron el caché: misma evidencia y mismos textos.
+    for (const code of ["M-PZ2", "M-PZ3", "M-PZ4"]) {
+      expect(JSON.stringify(byMeter.get(code)!.signals)).toBe(signalsBefore.get(code)!);
+      expect(byMeter.get(code)!.reason).toBe("Consumo anómalo detectado por el análisis estadístico.");
+    }
   });
 
   test("a RESOLVED anomaly is history: the next run creates a NEW row for that meter", async () => {

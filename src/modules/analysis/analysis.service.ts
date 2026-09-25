@@ -11,6 +11,7 @@ import {
   FALLBACK_ACTION_SIMPLE,
   FALLBACK_REASON,
   FALLBACK_REASON_SIMPLE,
+  LLM_CONCURRENCY,
   SEVERITY_CONFIDENCE,
 } from "./analysis.domain";
 import type { LlmClient } from "./llm/analysis.llm.client";
@@ -24,11 +25,15 @@ import {
  * Orquestación del análisis (tasks 3.7/3.8):
  *  - start(): crea un AnalysisRun RUNNING con lockToken='single'
  *    (P2002 → 409 ANALYSIS_IN_PROGRESS) y lanza el runner desacoplado.
- *  - runAnalysis(): ejecuta el pipeline de 3 etapas sobre cada medidor y
- *    persiste UNA anomalía consolidada por medidor afectado + el status de
- *    medidor recalculado en una sola transacción. Fallback por reglas POR
- *    MEDIDOR si el LLM falla (explicación en español, llm_used=false para esa
- *    llamada): un timeout en un medidor no borra los hallazgos del resto.
+ *  - runAnalysis(): ejecuta el pipeline de 3 etapas sobre cada medidor con
+ *    concurrencia acotada (LLM_CONCURRENCY) y persiste UNA anomalía consolidada
+ *    por medidor afectado + el status de medidor recalculado en una sola
+ *    transacción. Si una anomalía OPEN previa tiene la MISMA evidencia
+ *    (detectionType + signals), se reutilizan sus explicaciones y NO se llama
+ *    al LLM (llm_used=false): re-runs sobre datos sin cambios son casi
+ *    instantáneos. Fallback por reglas POR MEDIDOR si el LLM falla (explicación
+ *    en español, llm_used=false para esa llamada): un timeout en un medidor no
+ *    borra los hallazgos del resto.
  *  - getStatus(): contrato de polling para GET /ai/analysis/:id.
  *
  * Solo orquestación: toda la persistencia vive en analysis.repository, los
@@ -98,13 +103,33 @@ export function createAnalysisService(
 
     let type = classification.type;
     let severity = classification.severity;
+    let confidence = SEVERITY_CONFIDENCE[severity];
     let reason: string;
     let recommendedAction: string;
     let reasonSimple: string;
     let recommendedActionSimple: string;
     let llmUsed = false;
 
-    if (classification.needsLlm) {
+    // Caché de explicaciones: si una anomalía OPEN previa tiene la MISMA
+    // evidencia (mismo detectionType + mismo signals), se reutilizan sus textos
+    // y NO se llama al LLM (llm_used=false): re-runs sobre datos sin cambios
+    // son casi instantáneos. El fingerprint ignora rangos/eventos a propósito:
+    // la evidencia persistida es la que define la anomalía.
+    const cached = await repository.findOpenMatchingEvidence(
+      meter.id,
+      consolidated.detectionType,
+      consolidated.signals,
+    );
+
+    if (cached) {
+      type = cached.type;
+      severity = cached.severity;
+      confidence = cached.confidence;
+      reason = cached.reason;
+      recommendedAction = cached.recommendedAction;
+      reasonSimple = cached.reasonSimple;
+      recommendedActionSimple = cached.recommendedActionSimple;
+    } else if (classification.needsLlm) {
       // Caso límite: el LLM clasifica la situación ambigua. Si el proveedor
       // falla, se conserva la clasificación determinista por reglas.
       try {
@@ -117,6 +142,7 @@ export function createAnalysisService(
         });
         type = llmResult.type;
         severity = llmResult.severity;
+        confidence = SEVERITY_CONFIDENCE[severity];
         reason = llmResult.reason;
         recommendedAction = llmResult.recommended_action;
         reasonSimple = llmResult.reason_simple;
@@ -203,7 +229,7 @@ export function createAnalysisService(
         rangeEnd: consolidated.rangeEnd,
         type,
         severity,
-        confidence: SEVERITY_CONFIDENCE[severity],
+        confidence,
         signals: consolidated.signals,
         // Punto único de normalización: garantiza el contrato de formato para
         // TANTO la salida del LLM como el fallback por reglas (idempotente).
@@ -213,6 +239,7 @@ export function createAnalysisService(
         reasonSimple: normalizeReasonSimple(reasonSimple),
         recommendedActionSimple: normalizeActionSimple(recommendedActionSimple),
         relatedEventId: relatedEvent?.id ?? null,
+        llmUsed,
       },
       llmUsed,
     };
@@ -225,26 +252,37 @@ export function createAnalysisService(
       : meters;
 
     const findings: AnalysisFinding[] = [];
-    // llm_used del run: true si CUALQUIER llamada al LLM tuvo éxito.
-    let llmUsed = false;
-    for (const meter of selectedMeters) {
-      try {
-        const { finding, llmUsed: meterLlmUsed } = await processMeter(
-          meter,
-          readingsByMeter.get(meter.id) ?? [],
-          eventsByMeter.get(meter.id) ?? [],
-        );
-        llmUsed = llmUsed || meterLlmUsed;
-        if (finding) findings.push(finding);
-      } catch (err) {
-        // Defensivo: un fallo inesperado en un medidor no debe matar el run.
-        logger.warn("medidor omitido por error inesperado durante el análisis", {
-          meterId: meter.meterId,
-          error: err instanceof Error ? err.message : String(err),
-        });
+    // Concurrencia acotada: el LLM es el cuello de botella (rate limits del
+    // proveedor), así que los medidores se procesan en lotes de LLM_CONCURRENCY
+    // con Promise.all. El orden de findings se conserva (lotes en orden, medidor
+    // por medidor dentro del lote) y el persist sigue siendo atómico al final.
+    for (let i = 0; i < selectedMeters.length; i += LLM_CONCURRENCY) {
+      const batch = selectedMeters.slice(i, i + LLM_CONCURRENCY);
+      const results = await Promise.all(
+        batch.map(async (meter) => {
+          try {
+            return await processMeter(
+              meter,
+              readingsByMeter.get(meter.id) ?? [],
+              eventsByMeter.get(meter.id) ?? [],
+            );
+          } catch (err) {
+            // Defensivo: un fallo inesperado en un medidor no debe matar el run.
+            logger.warn("medidor omitido por error inesperado durante el análisis", {
+              meterId: meter.meterId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+            return { finding: null, llmUsed: false };
+          }
+        }),
+      );
+      for (const result of results) {
+        if (result.finding) findings.push(result.finding);
       }
     }
 
+    // llm_used del run: true si CUALQUIER hallazgo usó el LLM en este run.
+    const llmUsed = findings.some((finding) => finding.llmUsed);
     const summary = `Detected ${findings.length} anomaly(ies) across ${new Set(findings.map((finding) => finding.meterId)).size} meter(s)`;
     await repository.persistFindings(runId, findings, summary, llmUsed);
   }

@@ -18,6 +18,9 @@ export const DQ_CONSUMPTION_TOLERANCE = 0.05;
 export const DQ_STD_RATIO = 5;
 export const SUSTAINED_HOURS = 12;
 
+/** Límite de llamadas LLM concurrentes para respetar rate limits del proveedor. */
+export const LLM_CONCURRENCY = 4;
+
 export const nearMissWindowMs = 6 * 60 * 60 * 1000;
 export const LLM_Z_MIN = 2.5;
 export const LLM_Z_MAX = 3;

@@ -26,6 +26,22 @@ export interface AnalysisFinding {
   reasonSimple: string;
   recommendedActionSimple: string;
   relatedEventId: string | null;
+  /** true si el LLM fue llamado y respondió en ESTE run; false en fallback y caché. */
+  llmUsed: boolean;
+}
+
+/**
+ * Explicaciones reutilizables de una anomalía OPEN previa con la misma evidencia
+ * (mismo detectionType + mismo signals). Evita una llamada al LLM en re-runs.
+ */
+export interface AnomalyEvidenceCache {
+  type: AnomalyType;
+  severity: Severity;
+  confidence: number;
+  reason: string;
+  reasonSimple: string;
+  recommendedAction: string;
+  recommendedActionSimple: string;
 }
 
 export interface PipelineData {
@@ -43,6 +59,15 @@ export interface AnalysisRepository {
     eventTimestamp: Date,
     eventType: MeterEvent["eventType"],
   ): Promise<{ id: string } | null>;
+  /**
+   * Caché de explicaciones: devuelve la anomalía OPEN del medidor cuya evidencia
+   * coincide con la actual (mismo detectionType + mismo signals JSON), o null.
+   */
+  findOpenMatchingEvidence(
+    meterId: string,
+    detectionType: string,
+    signals: object,
+  ): Promise<AnomalyEvidenceCache | null>;
   /** Persiste hallazgos + status de medidor recalculado + finalización del run, atómicamente. */
   persistFindings(
     runId: string,
@@ -68,6 +93,27 @@ async function findOpenByMeterAndType(
     where: { meterId, type: type as never, status: "OPEN" },
     select: { id: true },
   });
+}
+
+/**
+ * Serialización canónica (claves ordenadas recursivamente) para comparar
+ * señales de forma estable: Postgres jsonb reordena las claves al almacenar
+ * (por longitud y luego byte a byte), así que JSON.stringify directo NO es
+ * estable entre lo persistido y lo recién calculado.
+ */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, v]) => v !== undefined)
+    .sort(([a], [b]) => a.localeCompare(b));
+  return `{${entries
+    .map(([key, v]) => `${JSON.stringify(key)}:${stableStringify(v)}`)
+    .join(",")}}`;
 }
 
 export function createAnalysisRepository(prisma: PrismaClient): AnalysisRepository {
@@ -109,6 +155,40 @@ export function createAnalysisRepository(prisma: PrismaClient): AnalysisReposito
         where: { meterId, eventTimestamp, eventType },
         select: { id: true },
       });
+    },
+
+    async findOpenMatchingEvidence(meterId, detectionType, signals) {
+      const open = await prisma.anomaly.findMany({
+        where: { meterId, status: "OPEN" },
+        select: {
+          type: true,
+          severity: true,
+          confidence: true,
+          reason: true,
+          reasonSimple: true,
+          recommendedAction: true,
+          recommendedActionSimple: true,
+          detectionType: true,
+          signals: true,
+        },
+      });
+      // La evidencia es el fingerprint: mismo tipo de detección y señales
+      // idénticas (comparación canónica: jsonb no preserva el orden de claves).
+      const match = open.find(
+        (anomaly) =>
+          anomaly.detectionType === detectionType &&
+          stableStringify(anomaly.signals) === stableStringify(signals),
+      );
+      if (!match) return null;
+      return {
+        type: match.type,
+        severity: match.severity,
+        confidence: match.confidence,
+        reason: match.reason ?? "",
+        reasonSimple: match.reasonSimple ?? "",
+        recommendedAction: match.recommendedAction ?? "",
+        recommendedActionSimple: match.recommendedActionSimple ?? "",
+      };
     },
 
     async persistFindings(runId, findings, summary, llmUsed) {
