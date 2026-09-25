@@ -145,6 +145,22 @@ export function createAnalysisService(
       resolvedConfig,
     );
 
+    // Evento relacionado: se reutiliza la regla de cobertura del clasificador
+    // (fuente única de verdad) y se resuelve el evento persistido vía repository.
+    // Se calcula ANTES de la explicación para que el LLM pueda citarlo (sin
+    // esto, el modelo "adivina" que no hay evento y explica mal los falsos
+    // positivos por mantenimiento programado).
+    const covering = coveringEvent({
+      detectionType: consolidated.detectionType,
+      rangeStart: consolidated.rangeStart,
+      rangeEnd: consolidated.rangeEnd,
+      maxZ: consolidated.maxZ,
+      events,
+    });
+    const relatedEvent = covering
+      ? await repository.findEvent(meter.id, covering.eventTimestamp, covering.eventType)
+      : null;
+
     let type = classification.type;
     let severity = classification.severity;
     // F5: por defecto la confianza de la clasificación POR REGLAS (no hay
@@ -239,6 +255,15 @@ export function createAnalysisService(
           signals: consolidated.signals,
           rangeStart: consolidated.rangeStart.toISOString(),
           rangeEnd: consolidated.rangeEnd.toISOString(),
+          // El evento relacionado viaja al prompt: si un mantenimiento programado
+          // explica la señal, el LLM DEBE citarlo (y no decir "nadie avisó").
+          related_event: relatedEvent
+            ? {
+                event_type: relatedEvent.eventType,
+                event_timestamp: relatedEvent.eventTimestamp.toISOString(),
+                description: relatedEvent.description,
+              }
+            : null,
         });
         reason = explanation.reason;
         recommendedAction = explanation.recommended_action;
@@ -290,18 +315,7 @@ export function createAnalysisService(
       });
     }
 
-    // Evento relacionado: se reutiliza la regla de cobertura del clasificador
-    // (fuente única de verdad) y se resuelve el evento persistido vía repository.
-    const covering = coveringEvent({
-      detectionType: consolidated.detectionType,
-      rangeStart: consolidated.rangeStart,
-      rangeEnd: consolidated.rangeEnd,
-      maxZ: consolidated.maxZ,
-      events,
-    });
-    const relatedEvent = covering
-      ? await repository.findEvent(meter.id, covering.eventTimestamp, covering.eventType)
-      : null;
+    // Evento relacionado resuelto antes de la explicación (ver arriba).
 
     return {
       finding: {

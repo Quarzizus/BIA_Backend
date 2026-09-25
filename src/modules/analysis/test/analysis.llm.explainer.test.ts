@@ -21,6 +21,7 @@ const anomaly = {
   },
   rangeStart: "2026-09-12T14:00:00.000Z",
   rangeEnd: "2026-09-14T23:00:00.000Z",
+  related_event: null,
 };
 
 describe("buildExplainPrompt", () => {
@@ -136,5 +137,21 @@ describe("parseExplanation", () => {
         }),
       ),
     ).toThrow();
+  });
+});
+describe("buildExplainPrompt — evento relacionado", () => {
+  test("incluye el evento registrado y exige citarlo cuando existe", () => {
+    const messages = buildExplainPrompt({
+      ...anomaly,
+      related_event: {
+        event_type: "SCHEDULED_OUTAGE",
+        event_timestamp: "2026-09-08T00:00:00.000Z",
+        description: "Corte programado por mantenimiento durante 12 horas",
+      },
+    });
+    const user = messages[1]!.content;
+    expect(user).toContain("EVENTO RELACIONADO REGISTRADO EN EL SISTEMA");
+    expect(user).toContain("Corte programado por mantenimiento durante 12 horas");
+    expect(user).toContain("DEBE citarlo");
   });
 });

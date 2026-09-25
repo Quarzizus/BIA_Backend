@@ -13,6 +13,7 @@ const classifyInput = {
   signals: { max_z: 2.8, variables: ["consumption_kwh"] },
   rangeStart: "2026-09-12T14:00:00.000Z",
   rangeEnd: "2026-09-12T18:00:00.000Z",
+  related_event: null,
   // F3: los eventos viajan al modelo — son la razón de la ambigüedad.
   events: [
     { eventType: "OPERATIONAL_CHANGE", eventTimestamp: "2026-09-12T12:00:00.000Z" },
@@ -27,6 +28,7 @@ const explainInput = {
   signals: { max_z: 8.79, variation_pct: 152.5 },
   rangeStart: "2026-09-12T14:00:00.000Z",
   rangeEnd: "2026-09-14T23:00:00.000Z",
+  related_event: null,
 };
 
 let fetchCalls: { url: string; init: RequestInit }[] = [];

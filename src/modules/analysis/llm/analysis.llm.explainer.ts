@@ -69,6 +69,16 @@ export function buildExplainPrompt(
         ...(evidenceLines.length > 0
           ? ["", "Evidencia por variable (baseline → reciente):", ...evidenceLines]
           : []),
+        ...(anomaly.related_event
+          ? [
+              "",
+              "EVENTO RELACIONADO REGISTRADO EN EL SISTEMA:",
+              `- Tipo: ${anomaly.related_event.event_type}`,
+              `- Timestamp: ${anomaly.related_event.event_timestamp}`,
+              `- Descripción: ${anomaly.related_event.description}`,
+              "Este evento explica la señal detectada. Tu explicación DEBE citarlo y no afirmar que no hay evento ni que nadie avisó al sistema.",
+            ]
+          : []),
       ].join("\n"),
     },
   ];

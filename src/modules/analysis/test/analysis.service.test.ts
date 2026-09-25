@@ -1000,3 +1000,35 @@ describe("start({ meterCodes }) — análisis por medidor", () => {
     });
   });
 });
+describe("explain recibe el evento relacionado (prompt con contexto)", () => {
+  test("un FALSE_POSITIVE por mantenimiento pasa el evento al LLM", async () => {
+    await clearOpenAnomalies();
+    let captured: any = null;
+    const capturing = createAnalysisService(
+      prisma,
+      createFakeLlm({
+        async explain(input: any) {
+          captured = input;
+          return {
+            reason: "Caída por mantenimiento programado.",
+            recommended_action: "No requiere acción.",
+            reason_simple: "Fue una parada prevista.",
+            recommended_action_simple: "No hacer nada.",
+          };
+        },
+      }),
+      { AI_API_KEY: "test-key", AI_BASE_URL: "https://fake/v1", AI_MODEL: "test" },
+    );
+    const run = await prisma.analysisRun.create({
+      data: { status: "RUNNING", lockToken: "single" },
+    });
+    createdRunIds.push(run.id);
+    await capturing.runAnalysis(run.id, { meterCodes: ["M-PZ3"] });
+
+    expect(captured).not.toBeNull();
+    expect(captured.related_event).not.toBeNull();
+    expect(captured.related_event.event_type).toBe("SCHEDULED_OUTAGE");
+    expect(captured.related_event.description).toBe("Mantenimiento programado");
+    await prisma.anomaly.deleteMany({ where: { meter: { meterId: "M-PZ3" }, status: "OPEN" } });
+  });
+});

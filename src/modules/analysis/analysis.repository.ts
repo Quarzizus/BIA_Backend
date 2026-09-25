@@ -63,7 +63,7 @@ export interface AnalysisRepository {
     meterId: string,
     eventTimestamp: Date,
     eventType: MeterEvent["eventType"],
-  ): Promise<{ id: string } | null>;
+  ): Promise<{ id: string; eventType: MeterEvent["eventType"]; eventTimestamp: Date; description: string } | null>;
   /**
    * Caché de explicaciones: devuelve la anomalía OPEN del medidor cuya evidencia
    * coincide con la actual (mismo detectionType + mismo signals JSON) y cuyo
@@ -172,7 +172,7 @@ export function createAnalysisRepository(prisma: PrismaClient): AnalysisReposito
     async findEvent(meterId, eventTimestamp, eventType) {
       return prisma.event.findFirst({
         where: { meterId, eventTimestamp, eventType },
-        select: { id: true },
+        select: { id: true, eventType: true, eventTimestamp: true, description: true },
       });
     },
 

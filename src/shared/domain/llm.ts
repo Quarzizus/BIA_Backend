@@ -43,6 +43,8 @@ export interface ExplainInput {
   signals: Record<string, unknown>;
   rangeStart: string;
   rangeEnd: string;
+  /** Evento relacionado registrado (si cubre el rango) — el LLM DEBE citarlo en la explicación. */
+  related_event: { event_type: string; event_timestamp: string; description: string } | null;
 }
 
 export interface ExplainOutput {
