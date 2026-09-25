@@ -12,6 +12,7 @@ Cómo está organizado el código y cómo funciona el análisis. Para levantar e
 | ORM           | Prisma 7                                                            |
 | IA            | API compatible con OpenAI (`AI_API_KEY`, `AI_BASE_URL`, `AI_MODEL`) |
 | Validación    | zod 4                                                               |
+| Autenticación | better-auth (sesiones por cookie httpOnly; solo el admin sembrado)   |
 | Testing       | `bun test`                                                          |
 | Lint          | ESLint (`bun run lint`)                                             |
 
@@ -82,6 +83,7 @@ flowchart LR
 | Status | Código                      | Condición                   |
 | ------ | --------------------------- | --------------------------- |
 | 400    | `VALIDATION_ERROR`          | Entrada inválida            |
+| 401    | `UNAUTHORIZED`              | Sin sesión en una ruta protegida (todas excepto `/`, `/docs`, `/openapi.yaml` y `/api/auth/*`) |
 | 404    | `NOT_FOUND`                 | Recurso inexistente         |
 | 409    | `ANALYSIS_IN_PROGRESS`      | Ya hay un análisis en curso |
 | 409    | `INVALID_STATUS_TRANSITION` | Transición de estado ilegal |
