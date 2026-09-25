@@ -15,6 +15,8 @@ export type { ExplainInput, ExplainOutput };
 const explanationSchema = z.object({
   reason: z.string().min(1),
   recommended_action: z.string().min(1),
+  reason_simple: z.string().min(1),
+  recommended_action_simple: z.string().min(1),
 });
 
 /**
@@ -52,12 +54,16 @@ export function buildExplainPrompt(
     {
       role: "user",
       content: [
-        "Explica la siguiente anomalía confirmada: genera reason (por qué es una anomalía) y recommended_action (acción recomendada) en español.",
+        "Explica la siguiente anomalía confirmada: genera reason (por qué es una anomalía), recommended_action (acción recomendada), reason_simple (explicación en lenguaje cotidiano) y recommended_action_simple (pasos cotidianos) en español.",
         'Formato de reason: 2-3 párrafos cortos separados por una línea en blanco ("\\n\\n"), cada párrafo de 1-3 frases.',
         'Formato de recommended_action: lista markdown de 2-4 items, cada uno con prefijo "- " y una sola frase imperativa.',
+        'Formato de reason_simple: 1-2 párrafos de 1-2 frases cada uno, lenguaje cotidiano SIN jerga técnica; si mencionas un concepto, explícalo con una analogía entendible.',
+        'Formato de recommended_action_simple: 2-3 pasos cotidianos con prefijo "- ", que cualquier persona pueda seguir.',
         'IMITA EXACTAMENTE este formato (respeta "\\n\\n" entre párrafos y "- " por item):',
         'reason: "El consumo pasó de 43.7 a 92.8 kWh/h (+112.3%), con un pico de |z| 9.73 a las 14:00 del 12-sep.\\n\\nNo hay evento que explique la señal: el medidor no registró mantenimiento ni cambios operativos.\\n\\nEl impacto es alto: el consumo se duplicó y se mantiene elevado."',
         'recommended_action: "- Inspeccionar el medidor y sus conexiones.\\n- Verificar la carga conectada al circuito.\\n- Revisar el historial de las últimas 48 horas."',
+        'reason_simple: "El medidor M-109 está consumiendo casi el doble de lo normal desde el 12 de septiembre. La caída en la eficiencia eléctrica sugiere que algo se conectó o se dañó en la instalación."',
+        'recommended_action_simple: "- Llama a un electricista para revisar la instalación.\\n- Verifica si se conectó un equipo nuevo en esos días.\\n- Pide revisar el medidor si el problema persiste."',
         "Datos del caso:",
         JSON.stringify(anomaly, null, 2),
         ...(evidenceLines.length > 0

@@ -23,6 +23,8 @@ export interface AnalysisFinding {
   signals: object;
   reason: string;
   recommendedAction: string;
+  reasonSimple: string;
+  recommendedActionSimple: string;
   relatedEventId: string | null;
 }
 
@@ -129,6 +131,8 @@ export function createAnalysisRepository(prisma: PrismaClient): AnalysisReposito
                 confidence: finding.confidence,
                 reason: finding.reason,
                 recommendedAction: finding.recommendedAction,
+                reasonSimple: finding.reasonSimple,
+                recommendedActionSimple: finding.recommendedActionSimple,
                 rangeStart: finding.rangeStart,
                 rangeEnd: finding.rangeEnd,
                 detectionType: finding.detectionType,
@@ -147,6 +151,8 @@ export function createAnalysisRepository(prisma: PrismaClient): AnalysisReposito
                 confidence: finding.confidence,
                 reason: finding.reason,
                 recommendedAction: finding.recommendedAction,
+                reasonSimple: finding.reasonSimple,
+                recommendedActionSimple: finding.recommendedActionSimple,
                 status: "OPEN",
                 rangeStart: finding.rangeStart,
                 rangeEnd: finding.rangeEnd,

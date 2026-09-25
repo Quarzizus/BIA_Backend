@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PrismaClient } from "../generated/prisma/client";
@@ -39,6 +40,20 @@ async function databaseExists(client: import("pg").Client, name: string): Promis
   return (result.rowCount ?? 0) > 0;
 }
 
+/** Tabla de tracking de Prisma; se crea si falta (bases legacy sin tracking). */
+const PRISMA_MIGRATIONS_TABLE_SQL = `
+  CREATE TABLE IF NOT EXISTS "_prisma_migrations" (
+    "id" TEXT PRIMARY KEY,
+    "checksum" TEXT NOT NULL,
+    "finished_at" TIMESTAMPTZ,
+    "migration_name" TEXT NOT NULL,
+    "logs" TEXT,
+    "rolled_back_at" TIMESTAMPTZ,
+    "started_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
+    "applied_steps_count" INTEGER NOT NULL DEFAULT 0
+  );
+`;
+
 /**
  * Garantiza que la base aislada `<dbName>` exista con el schema actual.
  * Idempotente: seguro llamarlo desde el beforeAll de cada archivo de test.
@@ -52,18 +67,64 @@ export async function provisionTestDb(dbName: string): Promise<void> {
     }
   });
 
-  // 2. Aplicar el SQL de migración si falta el schema (idempotente).
+  // 2. Aplicar TODAS las migraciones pendientes en orden cronológico, con
+  //    tracking en _prisma_migrations (mismo contrato que `prisma migrate`).
+  //    Antes solo se aplicaba la migración init cuando faltaba la tabla
+  //    "meters"; una base existente se quedaba con el schema viejo y rompía
+  //    al añadir columnas nuevas. Ahora toda base (nueva o existente) termina
+  //    con el schema actual.
   await withPg(testDbUrl(dbName), async (client) => {
-    const tables = await client.query(
-      "SELECT 1 FROM information_schema.tables WHERE table_name = 'meters'",
+    const migrationDir = join(import.meta.dir, "../../prisma/migrations");
+    const fs = await import("node:fs/promises");
+    const dirs = (await fs.readdir(migrationDir, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+
+    // Tracking: asegura la tabla y lee las migraciones ya aplicadas.
+    await client.query(PRISMA_MIGRATIONS_TABLE_SQL);
+    const appliedResult = await client.query<{ migration_name: string }>(
+      'SELECT migration_name FROM "_prisma_migrations" WHERE finished_at IS NOT NULL',
     );
-    if (tables.rowCount === 0) {
-      const migrationDir = join(import.meta.dir, "../../prisma/migrations");
-      const files = await import("node:fs/promises").then((fs) => fs.readdir(migrationDir));
-      const initMigration = files.find((f) => f.includes("init"));
-      if (!initMigration) throw new Error(`provisionTestDb: init migration not found for ${dbName}`);
-      const sql = readFileSync(join(migrationDir, initMigration, "migration.sql"), "utf8");
-      await client.query(sql);
+    const applied = new Set(appliedResult.rows.map((row) => row.migration_name));
+
+    const recordApplied = async (name: string, sql: string): Promise<void> => {
+      // Prisma calcula el checksum de una migración SQL como el SHA-256 del archivo.
+      const checksum = createHash("sha256").update(sql).digest("hex");
+      await client.query(
+        `INSERT INTO "_prisma_migrations" ("id", "checksum", "finished_at", "migration_name", "applied_steps_count")
+         VALUES ($1, $2, now(), $3, 1)`,
+        [randomUUID(), checksum, name],
+      );
+    };
+
+    for (const dir of dirs) {
+      if (applied.has(dir)) continue;
+      const sql = readFileSync(join(migrationDir, dir, "migration.sql"), "utf8");
+
+      // Bases legacy (aprovisionadas aplicando la init con SQL crudo, sin
+      // tracking): la init ya está aplicada aunque _prisma_migrations no lo
+      // diga. Se registra como aplicada SIN re-ejecutarla (los objetos existen).
+      if (dir.includes("init")) {
+        const meters = await client.query(
+          "SELECT 1 FROM information_schema.tables WHERE table_name = 'meters'",
+        );
+        if ((meters.rowCount ?? 0) > 0) {
+          await recordApplied(dir, sql);
+          continue;
+        }
+      }
+
+      // Migración pendiente: se aplica y se registra atómicamente.
+      await client.query("BEGIN");
+      try {
+        await client.query(sql);
+        await recordApplied(dir, sql);
+        await client.query("COMMIT");
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      }
     }
   });
 }

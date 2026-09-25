@@ -1,12 +1,18 @@
 import type { Meter, PrismaClient, Reading } from "../../generated/prisma/client";
 import { ApiError } from "../../shared/errors";
 import type { LlmEnv } from "../../shared/domain/llm";
-import { normalizeAction, normalizeReason } from "../../shared/domain/llm-format";
+import { normalizeAction, normalizeActionSimple, normalizeReason, normalizeReasonSimple } from "../../shared/domain/llm-format";
 import { logger } from "../../shared/logger";
 import { computeBaseline } from "./stages/analysis.baseline.calculator";
 import { classifyAnomaly, coveringEvent, type MeterEvent } from "./stages/analysis.classifier";
 import { consolidateDetections, detectMeter } from "./stages/analysis.detector";
-import { FALLBACK_ACTION, FALLBACK_REASON, SEVERITY_CONFIDENCE } from "./analysis.domain";
+import {
+  FALLBACK_ACTION,
+  FALLBACK_ACTION_SIMPLE,
+  FALLBACK_REASON,
+  FALLBACK_REASON_SIMPLE,
+  SEVERITY_CONFIDENCE,
+} from "./analysis.domain";
 import type { LlmClient } from "./llm/analysis.llm.client";
 import {
   createAnalysisRepository,
@@ -94,6 +100,8 @@ export function createAnalysisService(
     let severity = classification.severity;
     let reason: string;
     let recommendedAction: string;
+    let reasonSimple: string;
+    let recommendedActionSimple: string;
     let llmUsed = false;
 
     if (classification.needsLlm) {
@@ -111,6 +119,8 @@ export function createAnalysisService(
         severity = llmResult.severity;
         reason = llmResult.reason;
         recommendedAction = llmResult.recommended_action;
+        reasonSimple = llmResult.reason_simple;
+        recommendedActionSimple = llmResult.recommended_action_simple;
         llmUsed = true;
       } catch (err) {
         logger.warn("LLM no disponible para clasificar; se usa la clasificación por reglas", {
@@ -124,6 +134,13 @@ export function createAnalysisService(
           consolidated.variationPct,
         );
         recommendedAction = FALLBACK_ACTION[type];
+        reasonSimple = FALLBACK_REASON_SIMPLE(
+          type,
+          consolidated.detectionType,
+          consolidated.maxZ,
+          consolidated.variationPct,
+        );
+        recommendedActionSimple = FALLBACK_ACTION_SIMPLE[type];
       }
     } else {
       // Anomalía confirmada: el LLM genera la explicación en español. Si el
@@ -140,6 +157,8 @@ export function createAnalysisService(
         });
         reason = explanation.reason;
         recommendedAction = explanation.recommended_action;
+        reasonSimple = explanation.reason_simple;
+        recommendedActionSimple = explanation.recommended_action_simple;
         llmUsed = true;
       } catch (err) {
         logger.warn("LLM no disponible para explicar; se genera una explicación por reglas", {
@@ -153,6 +172,13 @@ export function createAnalysisService(
           consolidated.variationPct,
         );
         recommendedAction = FALLBACK_ACTION[type];
+        reasonSimple = FALLBACK_REASON_SIMPLE(
+          type,
+          consolidated.detectionType,
+          consolidated.maxZ,
+          consolidated.variationPct,
+        );
+        recommendedActionSimple = FALLBACK_ACTION_SIMPLE[type];
       }
     }
 
@@ -181,8 +207,11 @@ export function createAnalysisService(
         signals: consolidated.signals,
         // Punto único de normalización: garantiza el contrato de formato para
         // TANTO la salida del LLM como el fallback por reglas (idempotente).
+        // Las cuatro explicaciones (técnica + simple) pasan por su normalizador.
         reason: normalizeReason(reason),
         recommendedAction: normalizeAction(recommendedAction),
+        reasonSimple: normalizeReasonSimple(reasonSimple),
+        recommendedActionSimple: normalizeActionSimple(recommendedActionSimple),
         relatedEventId: relatedEvent?.id ?? null,
       },
       llmUsed,

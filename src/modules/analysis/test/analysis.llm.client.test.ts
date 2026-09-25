@@ -61,6 +61,8 @@ describe("createLlmClient — classify", () => {
                 severity: "HIGH",
                 reason: "Consumo anómalo detectado",
                 recommended_action: "Revisar instalación",
+                reason_simple: "El consumo subió de forma notoria.",
+                recommended_action_simple: "Revisa la instalación del medidor.",
               }),
             },
           },
@@ -74,6 +76,8 @@ describe("createLlmClient — classify", () => {
       expect(result.severity).toBe("HIGH");
       expect(result.reason).toContain("anómalo");
       expect(result.recommended_action).toBe("Revisar instalación");
+      expect(result.reason_simple).toContain("consumo");
+      expect(result.recommended_action_simple).toContain("medidor");
 
       expect(fetchCalls).toHaveLength(1);
       expect(fetchCalls[0]!.url).toBe("https://llm.example.com/v1/chat/completions");
@@ -113,6 +117,32 @@ describe("createLlmClient — classify", () => {
     }
   });
 
+  test("throws when the response omits the simple explanation fields", async () => {
+    const restore = mockFetch(
+      jsonResponse({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                type: "REAL_ANOMALY",
+                severity: "HIGH",
+                reason: "Consumo anómalo detectado",
+                recommended_action: "Revisar instalación",
+                // reason_simple / recommended_action_simple faltan → schema fail-fast.
+              }),
+            },
+          },
+        ],
+      }),
+    );
+    try {
+      const client = createLlmClient(env);
+      await expect(client.classify(classifyInput)).rejects.toThrow();
+    } finally {
+      restore();
+    }
+  });
+
   test("throws on an HTTP 500 provider error", async () => {
     const restore = mockFetch(jsonResponse({ error: "boom" }, 500));
     try {
@@ -135,7 +165,7 @@ describe("createLlmClient — classify", () => {
 });
 
 describe("createLlmClient — explain", () => {
-  test("returns Spanish reason + recommended_action for a confirmed anomaly", async () => {
+  test("returns the 4 Spanish explanations (technical + simple) for a confirmed anomaly", async () => {
     const restore = mockFetch(
       jsonResponse({
         choices: [
@@ -144,6 +174,9 @@ describe("createLlmClient — explain", () => {
               content: JSON.stringify({
                 reason: "Consumo muy por encima de la línea base durante un periodo sostenido.",
                 recommended_action: "Revisar la instalación eléctrica del medidor.",
+                reason_simple:
+                  "El medidor está consumiendo casi el doble de lo normal desde septiembre.",
+                recommended_action_simple: "Llama a un electricista para revisar la instalación.",
               }),
             },
           },
@@ -155,8 +188,33 @@ describe("createLlmClient — explain", () => {
       const result = await client.explain(explainInput);
       expect(result.reason).toContain("línea base");
       expect(result.recommended_action).toContain("medidor");
+      expect(result.reason_simple).toContain("doble de lo normal");
+      expect(result.recommended_action_simple).toContain("electricista");
       const body = JSON.parse(fetchCalls[0]!.init.body as string);
       expect(body.model).toBe("test-model");
+    } finally {
+      restore();
+    }
+  });
+
+  test("throws when the explanation omits the simple fields", async () => {
+    const restore = mockFetch(
+      jsonResponse({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                reason: "Consumo muy por encima de la línea base.",
+                recommended_action: "Revisar la instalación.",
+              }),
+            },
+          },
+        ],
+      }),
+    );
+    try {
+      const client = createLlmClient(env);
+      await expect(client.explain(explainInput)).rejects.toThrow();
     } finally {
       restore();
     }

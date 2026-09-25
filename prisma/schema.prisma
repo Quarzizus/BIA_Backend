@@ -93,24 +93,26 @@ model Event {
 }
 
 model Anomaly {
-  id                String         @id @default(cuid())
-  meterId           String
-  meter             Meter          @relation(fields: [meterId], references: [id], onDelete: Cascade)
-  analysisRunId     String
-  analysisRun       AnalysisRun    @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
-  relatedEventId    String?
-  relatedEvent      Event?         @relation(fields: [relatedEventId], references: [id], onDelete: SetNull)
-  detectedAt        DateTime       @default(now())
-  type              AnomalyType
-  severity          Severity
-  confidence        Float
-  reason            String?
-  recommendedAction String?
-  status            AnomalyStatus  @default(OPEN)
-  rangeStart        DateTime
-  rangeEnd          DateTime
-  detectionType     String
-  signals           Json
+  id                      String        @id @default(cuid())
+  meterId                 String
+  meter                   Meter         @relation(fields: [meterId], references: [id], onDelete: Cascade)
+  analysisRunId           String
+  analysisRun             AnalysisRun   @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
+  relatedEventId          String?
+  relatedEvent            Event?        @relation(fields: [relatedEventId], references: [id], onDelete: SetNull)
+  detectedAt              DateTime      @default(now())
+  type                    AnomalyType
+  severity                Severity
+  confidence              Float
+  reason                  String?
+  recommendedAction       String?
+  reasonSimple            String?
+  recommendedActionSimple String?
+  status                  AnomalyStatus @default(OPEN)
+  rangeStart              DateTime
+  rangeEnd                DateTime
+  detectionType           String
+  signals                 Json
 
   @@index([meterId, status])
   @@index([analysisRunId])

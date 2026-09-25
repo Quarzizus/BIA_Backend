@@ -571,6 +571,7 @@ components:
         - confidence
         - status
         - recommended_action
+        - recommended_action_simple
         - detected_at
       properties:
         id:
@@ -594,6 +595,13 @@ components:
             Acción recomendada en español (markdown-ligero): lista de 2-4 items,
             cada uno con prefijo `- ` y una sola frase imperativa.
             Mismo formato cuando la explicación es generada por reglas (llm_used: false).
+        recommended_action_simple:
+          type: [string, "null"]
+          description: |
+            Acción recomendada en lenguaje cotidiano (público general): lista de
+            2-3 pasos con prefijo `- `, sin jerga técnica, que cualquier persona
+            pueda seguir. El detalle (`GET /anomalies/{id}`) expone además la
+            versión técnica para alternar entre ambos formatos.
         detected_at:
           type: string
           format: date-time
@@ -673,6 +681,7 @@ components:
             - detection_type
             - signals
             - reason
+            - reason_simple
             - related_event
             - analysis_run_id
           properties:
@@ -695,6 +704,12 @@ components:
                 Explicación en español generada por la IA (markdown-ligero): 2-3
                 párrafos cortos separados por línea en blanco (`\n\n`), cada uno
                 de 1-3 frases.
+            reason_simple:
+              type: [string, "null"]
+              description: |
+                Explicación en lenguaje cotidiano (público general): 1-2 párrafos
+                de 1-2 frases, sin jerga técnica. El frontend puede alternar entre
+                la versión simple y la técnica (`reason`) con un toggle.
             related_event:
               anyOf:
                 - $ref: "#/components/schemas/RelatedEvent"

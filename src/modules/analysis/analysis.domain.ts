@@ -133,3 +133,33 @@ export const FALLBACK_ACTION: Record<AnomalyType, string> = {
   DATA_QUALITY:
     "- Verificar la integridad de la medición (sensores y registro).\n- Recalibrar o reemplazar el sensor si persiste la inconsistencia.",
 };
+
+/**
+ * Fallback SIMPLE por reglas: explicación cotidiana (1-2 párrafos de 1-2
+ * frases) sin jerga técnica. Evita términos como |z| o kWh; habla de "consumo"
+ * y de cambios "respecto a lo normal". El texto marca el origen por reglas.
+ */
+export function FALLBACK_REASON_SIMPLE(
+  type: AnomalyType,
+  detectionType: string,
+  maxZ: number | null,
+  variationPct: number | null,
+): string {
+  const variation =
+    variationPct !== null
+      ? `El consumo cambió un ${variationPct}% respecto a lo normal.`
+      : "El consumo cambió de forma notable respecto a lo normal.";
+  return `${variation}\n\nEl sistema no pudo consultar al asistente automático, así que esta explicación se generó automáticamente.`;
+}
+
+/** Acción SIMPLE por reglas (fallback del LLM): 2-3 pasos cotidianos con prefijo "- ". */
+export const FALLBACK_ACTION_SIMPLE: Record<AnomalyType, string> = {
+  REAL_ANOMALY:
+    "- Llama a un electricista para revisar la instalación.\n- Verifica si se conectó un equipo nuevo en esos días.\n- Pide revisar el medidor si el problema persiste.",
+  EXPLAINABLE_ANOMALY:
+    "- Confirma si hubo un cambio reciente en la operación o el local.\n- Observa el consumo durante los próximos dos días.\n- Si no vuelve a la normalidad, consulta a un electricista.",
+  FALSE_POSITIVE:
+    "- Verifica que la alerta coincida con el corte o mantenimiento programado.\n- No se necesita hacer nada más si se confirma.",
+  DATA_QUALITY:
+    "- Revisa que el medidor y sus sensores estén bien conectados.\n- Reporta el problema al proveedor de energía si persiste.",
+};

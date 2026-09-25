@@ -21,6 +21,7 @@ function toListItem(anomaly: AnomalyRow): AnomalyListItem {
     confidence: anomaly.confidence,
     status: anomaly.status,
     recommended_action: anomaly.recommendedAction,
+    recommended_action_simple: anomaly.recommendedActionSimple,
     detected_at: anomaly.detectedAt.toISOString(),
   };
 }
@@ -40,6 +41,7 @@ export function createAnomalyService(prisma: PrismaClient): AnomalyService {
       detection_type: anomaly.detectionType,
       signals: anomaly.signals as Record<string, unknown>,
       reason: anomaly.reason,
+      reason_simple: anomaly.reasonSimple,
       related_event: anomaly.relatedEvent
         ? {
             id: anomaly.relatedEvent.id,

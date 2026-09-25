@@ -27,6 +27,7 @@ export interface AnomalyListItem {
   confidence: number;
   status: string;
   recommended_action: string | null;
+  recommended_action_simple: string | null;
   detected_at: string;
 }
 
@@ -43,6 +44,7 @@ export interface AnomalyDetail extends AnomalyListItem {
   detection_type: string;
   signals: Record<string, unknown>;
   reason: string | null;
+  reason_simple: string | null;
   related_event: RelatedEventDto | null;
   analysis_run_id: string;
 }
@@ -56,12 +58,14 @@ export interface AnomalyRow {
   confidence: number;
   status: AnomalyStatus;
   recommendedAction: string | null;
+  recommendedActionSimple: string | null;
   detectedAt: Date;
   rangeStart: Date;
   rangeEnd: Date;
   detectionType: string;
   signals: unknown;
   reason: string | null;
+  reasonSimple: string | null;
   relatedEvent: {
     id: string;
     eventType: EventType;

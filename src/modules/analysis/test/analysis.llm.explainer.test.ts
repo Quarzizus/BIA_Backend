@@ -46,6 +46,18 @@ describe("buildExplainPrompt", () => {
     expect(messages[1]!.content).toContain("markdown");
   });
 
+  test("instructs the simple versions (cotidiano, sin jerga, 1-2 frases y 2-3 pasos)", () => {
+    const messages = buildExplainPrompt(anomaly);
+    // Sistema: contrato dual para reason_simple/recommended_action_simple.
+    expect(messages[0]!.content).toContain("reason_simple");
+    expect(messages[0]!.content).toContain("COTIDIANO");
+    expect(messages[0]!.content).toContain("analogía");
+    // Prompt del usuario: reglas de formato simple.
+    expect(messages[1]!.content).toContain("reason_simple");
+    expect(messages[1]!.content).toContain("lenguaje cotidiano SIN jerga técnica");
+    expect(messages[1]!.content).toContain("cualquier persona pueda seguir");
+  });
+
   test("embeds the few-shot example with the exact desired format", () => {
     const messages = buildExplainPrompt(anomaly);
     // Ejemplo few-shot en el prompt del usuario para que el modelo imite el formato.
@@ -54,6 +66,9 @@ describe("buildExplainPrompt", () => {
       "El consumo pasó de 43.7 a 92.8 kWh/h (+112.3%), con un pico de |z| 9.73 a las 14:00 del 12-sep.",
     );
     expect(messages[1]!.content).toContain("- Inspeccionar el medidor y sus conexiones.");
+    // El ejemplo few-shot cubre las 4 explicaciones (técnica + simple).
+    expect(messages[1]!.content).toContain("El medidor M-109 está consumiendo casi el doble");
+    expect(messages[1]!.content).toContain("- Llama a un electricista para revisar la instalación.");
     // El ejemplo muestra "\\n\\n" literal (representación JSON de los párrafos).
     expect(messages[1]!.content).toContain("\\n\\n");
     // El system prompt refuerza el contrato: nada de muros de texto ni numeración.
@@ -76,15 +91,19 @@ describe("buildExplainPrompt", () => {
 });
 
 describe("parseExplanation", () => {
-  test("parses a valid Spanish reason/action object", () => {
+  test("parses the 4 fields (technical + simple) of a valid explanation", () => {
     const parsed = parseExplanation(
       JSON.stringify({
         reason: "Consumo muy por encima de la línea base durante un periodo sostenido.",
         recommended_action: "Revisar la instalación eléctrica del medidor.",
+        reason_simple: "El medidor está consumiendo casi el doble de lo normal desde septiembre.",
+        recommended_action_simple: "Llama a un electricista para revisar la instalación.",
       }),
     );
     expect(parsed.reason).toContain("línea base");
     expect(parsed.recommended_action).toContain("medidor");
+    expect(parsed.reason_simple).toContain("doble de lo normal");
+    expect(parsed.recommended_action_simple).toContain("electricista");
   });
 
   test("throws on malformed JSON", () => {
@@ -95,9 +114,27 @@ describe("parseExplanation", () => {
     expect(() => parseExplanation(JSON.stringify({ reason: "solo razón" }))).toThrow();
   });
 
+  test("throws when the simple fields are missing", () => {
+    expect(() =>
+      parseExplanation(
+        JSON.stringify({
+          reason: "Razón técnica.",
+          recommended_action: "Acción técnica.",
+        }),
+      ),
+    ).toThrow();
+  });
+
   test("throws when fields are empty strings", () => {
     expect(() =>
-      parseExplanation(JSON.stringify({ reason: "", recommended_action: "" })),
+      parseExplanation(
+        JSON.stringify({
+          reason: "",
+          recommended_action: "",
+          reason_simple: "",
+          recommended_action_simple: "",
+        }),
+      ),
     ).toThrow();
   });
 });

@@ -1,5 +1,6 @@
 /**
- * Normalización del contrato de formato LLM (reason / recommended_action).
+ * Normalización del contrato de formato LLM (reason / recommended_action y sus
+ * versiones "simples" para público general).
  *
  * Módulo puro y defensivo: garantiza el formato canónico SIN importar qué
  * devuelva el modelo, para que lo persistido siempre cumpla el contrato:
@@ -7,6 +8,8 @@
  *    cada párrafo de 1-3 frases.
  *  - recommended_action: 2-4 items, cada uno en su línea con prefijo "- ",
  *    una frase imperativa en español por item.
+ *  - reason_simple: 1-2 párrafos de 1-2 frases, separados por "\n\n".
+ *  - recommended_action_simple: 2-3 items con prefijo "- ".
  *
  * Sin zod, sin Prisma, sin Express: solo strings. Si el texto ya cumple el
  * contrato, la normalización es idempotente (no lo altera).
@@ -18,6 +21,12 @@ const MAX_REASON_PARAGRAPHS = 3;
 const MAX_SENTENCES_PER_PARAGRAPH = 3;
 /** Máximo de items de recommended_action. */
 const MAX_ACTION_ITEMS = 4;
+/** Máximo de párrafos de reason_simple. */
+const MAX_REASON_SIMPLE_PARAGRAPHS = 2;
+/** Máximo de frases por párrafo de reason_simple. */
+const MAX_SENTENCES_PER_SIMPLE_PARAGRAPH = 2;
+/** Máximo de items de recommended_action_simple. */
+const MAX_ACTION_SIMPLE_ITEMS = 3;
 
 /**
  * Límite de frase: fin de frase (`.`, `!`, `?`) seguido de espacios y de un
@@ -40,6 +49,42 @@ function splitSentences(text: string): string[] {
 }
 
 /**
+ * Helper compartido: separa un texto que ya contiene párrafos ("\n\n") en
+ * párrafos limpios, colapsa 3+ saltos a 2, descarta vacíos y limita el total.
+ */
+function splitIntoParagraphs(text: string, maxParagraphs: number): string {
+  return text
+    .replace(COLLAPSE_BREAKS, "\n\n")
+    .split(/\n\s*\n/)
+    .map((paragraph) => paragraph.trim())
+    .filter((paragraph) => paragraph.length > 0)
+    .slice(0, maxParagraphs)
+    .join("\n\n");
+}
+
+/**
+ * Helper compartido: agrupa un muro de texto en párrafos de a lo sumo
+ * `sentencesPerParagraph` frases, con un máximo de `maxParagraphs` párrafos
+ * (el excedente se descarta).
+ */
+function groupSentencesIntoParagraphs(
+  text: string,
+  maxParagraphs: number,
+  sentencesPerParagraph: number,
+): string {
+  const sentences = splitSentences(text);
+  const paragraphs: string[] = [];
+  for (
+    let index = 0;
+    index < sentences.length && paragraphs.length < maxParagraphs;
+    index += sentencesPerParagraph
+  ) {
+    paragraphs.push(sentences.slice(index, index + sentencesPerParagraph).join(" "));
+  }
+  return paragraphs.join("\n\n");
+}
+
+/**
  * Normaliza `reason` al contrato canónico: 2-3 párrafos de 1-3 frases
  * separados por línea en blanco ("\n\n").
  *
@@ -54,24 +99,58 @@ export function normalizeReason(raw: string): string {
   if (text === "") return "";
 
   if (text.includes("\n\n")) {
-    const paragraphs = text
-      .replace(COLLAPSE_BREAKS, "\n\n")
-      .split(/\n\s*\n/)
-      .map((paragraph) => paragraph.trim())
-      .filter((paragraph) => paragraph.length > 0);
-    return paragraphs.slice(0, MAX_REASON_PARAGRAPHS).join("\n\n");
+    return splitIntoParagraphs(text, MAX_REASON_PARAGRAPHS);
+  }
+  return groupSentencesIntoParagraphs(text, MAX_REASON_PARAGRAPHS, MAX_SENTENCES_PER_PARAGRAPH);
+}
+
+/**
+ * Normaliza `reason_simple` al contrato canónico: 1-2 párrafos de 1-2 frases
+ * separados por línea en blanco ("\n\n"), en lenguaje cotidiano.
+ *
+ * Misma lógica que `normalizeReason` pero con límites más cortos (2 párrafos,
+ * 2 frases por párrafo): los textos simples deben ser breves y legibles.
+ */
+export function normalizeReasonSimple(raw: string): string {
+  const text = raw.trim();
+  if (text === "") return "";
+
+  if (text.includes("\n\n")) {
+    return splitIntoParagraphs(text, MAX_REASON_SIMPLE_PARAGRAPHS);
+  }
+  return groupSentencesIntoParagraphs(
+    text,
+    MAX_REASON_SIMPLE_PARAGRAPHS,
+    MAX_SENTENCES_PER_SIMPLE_PARAGRAPH,
+  );
+}
+
+/**
+ * Helper compartido de actions: convierte líneas o frases a items con prefijo
+ * "- ", descartando líneas vacías y limitando la lista a `maxItems`.
+ */
+function buildActionItems(raw: string, maxItems: number): string {
+  const text = raw.trim();
+  if (text === "") return "";
+
+  const items: string[] = [];
+  const pushItem = (line: string): void => {
+    const content = line
+      .trim()
+      .replace(/^\d+[).]\s*/, "") // "1)", "2.", "1." → sin número
+      .replace(/^[-*•]\s*/, ""); // bullets existentes ("- ", "*", "•") → sin prefijo
+    if (content.length > 0 && items.length < maxItems) {
+      items.push(`- ${content}`);
+    }
+  };
+
+  if (text.includes("\n")) {
+    for (const line of text.split(/\r?\n/)) pushItem(line);
+  } else {
+    for (const sentence of splitSentences(text)) pushItem(sentence);
   }
 
-  const sentences = splitSentences(text);
-  const paragraphs: string[] = [];
-  for (
-    let index = 0;
-    index < sentences.length && paragraphs.length < MAX_REASON_PARAGRAPHS;
-    index += MAX_SENTENCES_PER_PARAGRAPH
-  ) {
-    paragraphs.push(sentences.slice(index, index + MAX_SENTENCES_PER_PARAGRAPH).join(" "));
-  }
-  return paragraphs.join("\n\n");
+  return items.join("\n");
 }
 
 /**
@@ -85,25 +164,14 @@ export function normalizeReason(raw: string): string {
  * - Las líneas vacías se descartan y la lista se limita a 4 items.
  */
 export function normalizeAction(raw: string): string {
-  const text = raw.trim();
-  if (text === "") return "";
+  return buildActionItems(raw, MAX_ACTION_ITEMS);
+}
 
-  const items: string[] = [];
-  const pushItem = (line: string): void => {
-    const content = line
-      .trim()
-      .replace(/^\d+[).]\s*/, "") // "1)", "2.", "1." → sin número
-      .replace(/^[-*•]\s*/, ""); // bullets existentes ("- ", "*", "•") → sin prefijo
-    if (content.length > 0 && items.length < MAX_ACTION_ITEMS) {
-      items.push(`- ${content}`);
-    }
-  };
-
-  if (text.includes("\n")) {
-    for (const line of text.split(/\r?\n/)) pushItem(line);
-  } else {
-    for (const sentence of splitSentences(text)) pushItem(sentence);
-  }
-
-  return items.join("\n");
+/**
+ * Normaliza `recommended_action_simple` al contrato canónico: 2-3 items con
+ * prefijo "- ", pasos cotidianos. Misma lógica que `normalizeAction` pero con
+ * un tope de 3 items.
+ */
+export function normalizeActionSimple(raw: string): string {
+  return buildActionItems(raw, MAX_ACTION_SIMPLE_ITEMS);
 }

@@ -67,14 +67,15 @@ flowchart LR
 
 ### Qué es determinista (reglas, sin IA)
 
-- El baseline, la detección de señales y la consolidación (una anomalía por medidor).
+- El baseline, la detección de señales y la consolidación: una anomalía por medidor, y los análisis repetidos refrescan la abierta en vez de duplicarla.
 - La clasificación por eventos: un mantenimiento programado convierte la señal en falso positivo, un cambio operativo la explica, etc.
 - Los casos que las reglas no pueden decidir se marcan como ambiguos.
 
 ### Qué hace la IA
 
 - **Desempata** los casos ambiguos que las reglas no pueden decidir.
-- **Explica** cada anomalía confirmada en español: qué pasó y qué hacer, citando la evidencia (baseline vs reciente, por variable).
+- **Explica** cada anomalía confirmada en español, en dos versiones: técnica (con la evidencia) y simple (sin jerga, para cualquier persona).
+- Si el proveedor de IA no está disponible, el análisis se completa con explicaciones por reglas (`llm_used=false`).
 
 ## Errores
 

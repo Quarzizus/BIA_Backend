@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { normalizeAction, normalizeReason } from "../domain/llm-format";
+import {
+  normalizeAction,
+  normalizeActionSimple,
+  normalizeReason,
+  normalizeReasonSimple,
+} from "../domain/llm-format";
 
 describe("normalizeReason", () => {
   test("turns a wall of text into 2-3 paragraphs separated by a blank line", () => {
@@ -126,5 +131,86 @@ describe("normalizeAction", () => {
   test("returns an empty string for empty input", () => {
     expect(normalizeAction("")).toBe("");
     expect(normalizeAction("   ")).toBe("");
+  });
+});
+
+describe("normalizeReasonSimple", () => {
+  test("groups a wall of text into 1-2 paragraphs of at most 2 sentences", () => {
+    const wall =
+      "El medidor M-109 está consumiendo casi el doble de lo normal desde el 12 de septiembre. La caída en la eficiencia eléctrica sugiere que algo se conectó o se dañó en la instalación. Se recomienda llamar a un electricista para revisar.";
+    const normalized = normalizeReasonSimple(wall);
+    const paragraphs = normalized.split("\n\n");
+    expect(paragraphs.length).toBeGreaterThanOrEqual(1);
+    expect(paragraphs.length).toBeLessThanOrEqual(2);
+    for (const paragraph of paragraphs) {
+      const sentenceCount = paragraph
+        .split(".")
+        .filter((part) => part.trim().length > 0).length;
+      expect(sentenceCount).toBeLessThanOrEqual(2);
+    }
+  });
+
+  test("caps at 2 paragraphs when the text already has paragraph breaks", () => {
+    const three = Array.from(
+      { length: 3 },
+      (_, i) => `Párrafo ${i + 1}: una frase cotidiana.`,
+    ).join("\n\n");
+    expect(normalizeReasonSimple(three).split("\n\n")).toHaveLength(2);
+  });
+
+  test("keeps already-formatted text stable (idempotent)", () => {
+    const formatted =
+      "El consumo subió de forma notoria desde hace unos días.\n\nAlgo se conectó o se dañó en la instalación.";
+    expect(normalizeReasonSimple(formatted)).toBe(formatted);
+    expect(normalizeReasonSimple(normalizeReasonSimple(formatted))).toBe(
+      normalizeReasonSimple(formatted),
+    );
+  });
+
+  test("keeps the fallback simple string stable through the normalizer", () => {
+    const fallback =
+      "El consumo cambió un 112.3% respecto a lo normal.\n\nEl sistema no pudo consultar al asistente automático, así que esta explicación se generó automáticamente.";
+    expect(normalizeReasonSimple(fallback)).toBe(fallback);
+    expect(normalizeReasonSimple(normalizeReasonSimple(fallback))).toBe(
+      normalizeReasonSimple(fallback),
+    );
+  });
+
+  test("returns an empty string for empty input", () => {
+    expect(normalizeReasonSimple("")).toBe("");
+    expect(normalizeReasonSimple("   \n  ")).toBe("");
+  });
+});
+
+describe("normalizeActionSimple", () => {
+  test("converts numbered items to '- ' bullets, capping at 3", () => {
+    const numbered =
+      "1) Llama a un electricista para revisar la instalación.\n2. Verifica si se conectó un equipo nuevo.\n3) Pide revisar el medidor si el problema persiste.\n4) Escala a mantenimiento si nada cambia.";
+    expect(normalizeActionSimple(numbered)).toBe(
+      "- Llama a un electricista para revisar la instalación.\n- Verifica si se conectó un equipo nuevo.\n- Pide revisar el medidor si el problema persiste.",
+    );
+  });
+
+  test("splits a single blob into at most 3 '- ' bullets", () => {
+    const blob =
+      "Llama a un electricista. Verifica si se conectó un equipo nuevo. Pide revisar el medidor. Escala a mantenimiento si persiste.";
+    expect(normalizeActionSimple(blob).split("\n")).toHaveLength(3);
+    for (const line of normalizeActionSimple(blob).split("\n")) {
+      expect(line.startsWith("- ")).toBe(true);
+    }
+  });
+
+  test("keeps already-formatted bullets stable (idempotent)", () => {
+    const formatted =
+      "- Llama a un electricista para revisar la instalación.\n- Verifica si se conectó un equipo nuevo en esos días.";
+    expect(normalizeActionSimple(formatted)).toBe(formatted);
+    expect(normalizeActionSimple(normalizeActionSimple(formatted))).toBe(
+      normalizeActionSimple(formatted),
+    );
+  });
+
+  test("returns an empty string for empty input", () => {
+    expect(normalizeActionSimple("")).toBe("");
+    expect(normalizeActionSimple("   ")).toBe("");
   });
 });

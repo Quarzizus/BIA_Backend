@@ -14,6 +14,7 @@ const FIXTURE_METERS = ["M-PZ1", "M-PZ2", "M-PZ3", "M-PZ4"];
  * LLM falso (diseño D8): salidas deterministas en español, sin red. Los meters
  * del fixture reflejan las cuatro formas ground-truth para que el runner
  * ejercite el pipeline completo de 3 etapas contra la base de test aislada.
+ * Devuelve las 4 explicaciones (técnica + simple), como el contrato dual.
  */
 function createFakeLlm(overrides?: Partial<LlmClient>): LlmClient {
   return {
@@ -23,12 +24,18 @@ function createFakeLlm(overrides?: Partial<LlmClient>): LlmClient {
         severity: "HIGH",
         reason: "Caso límite clasificado por el modelo.",
         recommended_action: "Revisar manualmente.",
+        reason_simple: "El consumo subió de forma notoria. Algo se conectó o se dañó en la instalación.",
+        recommended_action_simple:
+          "Revisa la instalación del medidor. Llama a un electricista si persiste.",
       };
     },
     async explain() {
       return {
         reason: "Consumo anómalo detectado por el análisis estadístico.",
         recommended_action: "Revisar la instalación del medidor.",
+        reason_simple: "El consumo subió de forma notoria. Algo se conectó o se dañó en la instalación.",
+        recommended_action_simple:
+          "Revisa la instalación del medidor. Llama a un electricista si persiste.",
       };
     },
     ...overrides,
@@ -178,10 +185,13 @@ describe("runAnalysis pipeline", () => {
     expect(byMeter.get("M-PZ4")!.severity).toBe("HIGH");
     expect(byMeter.get("M-PZ4")!.relatedEvent?.eventType).toBe("DATA_QUALITY");
 
-    // Explicación en español persistida para cada anomalía confirmada.
+    // Explicación en español persistida para cada anomalía confirmada: tanto la
+    // versión técnica como la simple (contrato dual de 4 campos).
     for (const anomaly of anomalies) {
       expect(anomaly.reason).toContain("anómalo");
       expect(anomaly.recommendedAction).toContain("medidor");
+      expect(anomaly.reasonSimple).toContain("consumo");
+      expect(anomaly.recommendedActionSimple).toContain("medidor");
     }
   });
 
@@ -216,12 +226,17 @@ describe("runAnalysis pipeline", () => {
     // Cada anomalía conserva su clasificación determinista con explicación por reglas
     // siguiendo el mismo contrato de formato que el LLM: reason en 2 párrafos
     // separados por línea en blanco y recommended_action con bullets "- ".
+    // El fallback también genera la versión simple (contrato dual).
     for (const anomaly of anomalies) {
       expect(anomaly.reason).toContain("por reglas");
       expect(anomaly.reason).toContain(anomaly.type);
       expect(anomaly.reason).toContain("\n\n");
       expect(anomaly.recommendedAction!.startsWith("- ")).toBe(true);
       expect(anomaly.recommendedAction!.length).toBeGreaterThan(0);
+      expect(anomaly.reasonSimple).toContain("asistente automático");
+      expect(anomaly.reasonSimple!.startsWith("El consumo")).toBe(true);
+      expect(anomaly.recommendedActionSimple!.startsWith("- ")).toBe(true);
+      expect(anomaly.recommendedActionSimple!.length).toBeGreaterThan(0);
     }
   });
 
@@ -234,6 +249,10 @@ describe("runAnalysis pipeline", () => {
           return {
             reason: "Consumo anómalo detectado por el análisis estadístico.",
             recommended_action: "Revisar la instalación del medidor.",
+            reason_simple:
+              "El consumo subió de forma notoria. Algo se conectó o se dañó en la instalación.",
+            recommended_action_simple:
+              "Revisa la instalación del medidor. Llama a un electricista si persiste.",
           };
         },
       }),
@@ -258,8 +277,10 @@ describe("runAnalysis pipeline", () => {
     const byMeter = new Map(anomalies.map((a) => [a.meter!.meterId, a]));
     // El medidor con timeout usa el fallback por reglas; los demás conservan la explicación del LLM.
     expect(byMeter.get("M-PZ1")!.reason).toContain("por reglas");
+    expect(byMeter.get("M-PZ1")!.reasonSimple).toContain("asistente automático");
     for (const code of ["M-PZ2", "M-PZ3", "M-PZ4"]) {
       expect(byMeter.get(code)!.reason).toContain("anómalo");
+      expect(byMeter.get(code)!.reasonSimple).toContain("consumo");
     }
   });
 
@@ -276,6 +297,10 @@ describe("runAnalysis pipeline", () => {
               "El consumo pasó de 43.7 a 92.8 kWh/h (+112.3%), con un pico de |z| 9.73 a las 14:00 del 12-sep. No hay evento que explique la señal: el medidor no registró mantenimiento ni cambios operativos. El impacto es alto: el consumo se duplicó y se mantiene elevado. Se recomienda inspeccionar el medidor y verificar la carga conectada.",
             recommended_action:
               "1) Inspeccionar el medidor y sus conexiones.\n2) Verificar la carga conectada al circuito.\n3) Revisar el historial de las últimas 48 horas.",
+            reason_simple:
+              "El medidor consume el doble de lo normal desde septiembre. Algo se conectó o se dañó en la instalación. Conviene llamar a un electricista.",
+            recommended_action_simple:
+              "1) Llama a un electricista.\n2) Verifica si se conectó un equipo nuevo.\n3) Pide revisar el medidor.\n4) Escala a mantenimiento.",
           };
         },
       }),
@@ -306,6 +331,16 @@ describe("runAnalysis pipeline", () => {
     expect(actionLines.length).toBeGreaterThanOrEqual(2);
     expect(actionLines.length).toBeLessThanOrEqual(4);
     for (const line of actionLines) {
+      expect(line.startsWith("- ")).toBe(true);
+    }
+
+    // La versión simple también se normalizó: 1-2 párrafos y máx. 3 bullets.
+    const simpleParagraphs = anomaly.reasonSimple!.split("\n\n");
+    expect(simpleParagraphs.length).toBeGreaterThanOrEqual(1);
+    expect(simpleParagraphs.length).toBeLessThanOrEqual(2);
+    const simpleActionLines = anomaly.recommendedActionSimple!.split("\n");
+    expect(simpleActionLines.length).toBeLessThanOrEqual(3);
+    for (const line of simpleActionLines) {
       expect(line.startsWith("- ")).toBe(true);
     }
   });
@@ -364,6 +399,9 @@ describe("runAnalysis pipeline", () => {
           severity: "MEDIUM",
           reason: "Caso límite: cambio moderado sostenido clasificado por el modelo.",
           recommended_action: "Monitorear durante 48 horas.",
+          reason_simple: "El consumo subió de forma notoria. Algo se conectó o se dañó en la instalación.",
+          recommended_action_simple:
+            "Revisa la instalación del medidor. Llama a un electricista si persiste.",
         };
       },
     });
@@ -385,6 +423,9 @@ describe("runAnalysis pipeline", () => {
     expect(anomaly!.type).toBe("EXPLAINABLE_ANOMALY");
     expect(anomaly!.severity).toBe("MEDIUM");
     expect(anomaly!.reason).toContain("Caso límite");
+    // La clasificación del LLM también persiste la versión simple.
+    expect(anomaly!.reasonSimple).toContain("consumo");
+    expect(anomaly!.recommendedActionSimple).toContain("medidor");
 
     await prisma.anomaly.deleteMany({ where: { analysisRunId: run.id } });
     await prisma.reading.deleteMany({ where: { meterId: meter.id } });
@@ -415,6 +456,8 @@ describe("runAnalysis pipeline", () => {
         return {
           reason: "Explicación renovada por el segundo análisis.",
           recommended_action: "Revisar la instalación del medidor.",
+          reason_simple: "Explicación simple renovada por el segundo análisis.",
+          recommended_action_simple: "Revisa la instalación del medidor. Llama a un electricista.",
         };
       },
     });
@@ -455,6 +498,8 @@ describe("runAnalysis pipeline", () => {
     for (const anomaly of after) {
       expect(anomaly.analysisRunId).toBe(run2.id);
       expect(anomaly.reason).toBe("Explicación renovada por el segundo análisis.");
+      // Las versiones simples también se refrescan con el run actual.
+      expect(anomaly.reasonSimple).toBe("Explicación simple renovada por el segundo análisis.");
       expect(anomaly.detectedAt.getTime()).toBeGreaterThan(
         beforeByMeter.get(anomaly.meter!.meterId)!.detectedAt.getTime(),
       );

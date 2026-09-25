@@ -23,12 +23,18 @@ function fakeLlm(): LlmClient {
         severity: "HIGH",
         reason: "Caso límite clasificado por el modelo.",
         recommended_action: "Revisar manualmente.",
+        reason_simple: "El consumo subió de forma notoria. Algo se conectó o se dañó en la instalación.",
+        recommended_action_simple:
+          "Revisa la instalación del medidor. Llama a un electricista si persiste.",
       };
     },
     async explain() {
       return {
         reason: "Consumo anómalo detectado por el análisis estadístico.",
         recommended_action: "Revisar la instalación del medidor.",
+        reason_simple: "El consumo subió de forma notoria. Algo se conectó o se dañó en la instalación.",
+        recommended_action_simple:
+          "Revisa la instalación del medidor. Llama a un electricista si persiste.",
       };
     },
   };
@@ -188,6 +194,27 @@ describe("E2E pipeline on real seeded data (spec analysis-pipeline)", () => {
     expect(real!.severity).toBe("HIGH");
     // El normalizador garantiza el contrato de formato en lo expuesto por la API.
     expect(real!.recommended_action).toBe("- Revisar la instalación del medidor.");
+    // La lista expone la versión simple de la acción (legible para el público).
+    expect(real!.recommended_action_simple).toBeDefined();
+    expect(real!.recommended_action_simple!.length).toBeGreaterThan(0);
+  });
+
+  test("GET /anomalies/:id exposes the 4 explanations (toggle simple/técnica)", async () => {
+    const res = await fetch(`${baseUrl}/anomalies`);
+    const body = (await res.json()) as Array<Record<string, any>>;
+    const real = body.find((a) => a.meter_id === "M-109");
+    expect(real).toBeDefined();
+
+    const detailRes = await fetch(`${baseUrl}/anomalies/${real!.id}`);
+    expect(detailRes.status).toBe(200);
+    const detail = (await detailRes.json()) as Record<string, any>;
+    expect(detail.reason).toContain("anómalo");
+    expect(detail.recommended_action).toBe("- Revisar la instalación del medidor.");
+    // Detalle: las 4 explicaciones (técnica + simple) tras un run con LLM.
+    expect(detail.reason_simple).toBeDefined();
+    expect(detail.reason_simple!.length).toBeGreaterThan(0);
+    expect(detail.recommended_action_simple).toBeDefined();
+    expect(detail.recommended_action_simple!.length).toBeGreaterThan(0);
   });
 
   test("dashboard summary reflects the recomputed meter statuses (spec dashboard)", async () => {
