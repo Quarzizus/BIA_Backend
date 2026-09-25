@@ -269,6 +269,9 @@ paths:
       description: |
         Estado del run (`RUNNING`, `COMPLETED` o `FAILED`), resumen, número de
         anomalías consolidadas y si el LLM participó. Endpoint de polling.
+        `anomaly_count` cuenta las anomalías CREADAS por el run: un re-run que
+        solo refresca filas existentes reporta 0 (el resumen distingue
+        `(X new, Y refreshed)`).
       operationId: getAnalysisStatus
       parameters:
         - $ref: "#/components/parameters/AnalysisRunId"
@@ -586,7 +589,10 @@ components:
           $ref: "#/components/schemas/Severity"
         confidence:
           type: number
-          description: Confianza de la clasificación (HIGH 0.99, MEDIUM 0.9, LOW 0.8)
+          description: |
+            Confianza de la clasificación (0-1). Cuando el LLM clasifica el caso
+            límite se persiste su confianza; en la clasificación por reglas se
+            usa el valor por severidad (HIGH 0.99, MEDIUM 0.9, LOW 0.8).
         status:
           $ref: "#/components/schemas/AnomalyStatus"
         recommended_action:
@@ -716,7 +722,7 @@ components:
                 - type: "null"
             analysis_run_id:
               type: string
-              description: ID del run de análisis que la detectó
+              description: ID del run de análisis que CREÓ la anomalía (los re-runs que la refrescan no cambian este id)
 
     StatusUpdate:
       type: object
@@ -808,7 +814,7 @@ components:
           description: Resumen del run (presente al completar o fallar)
         anomaly_count:
           type: integer
-          description: Anomalías consolidadas por el run
+          description: Anomalías creadas por el run (los re-runs suelen mostrar 0; el resumen distingue nuevas vs refrescadas)
         llm_used:
           type: boolean
           description: Si el LLM participó en la clasificación/explicación

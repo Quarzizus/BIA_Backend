@@ -1,11 +1,8 @@
 import { mean, populationStd, variationPct } from "../../../shared/domain/baseline";
 import { DAY_MS, HOUR_MS } from "../../../shared/domain/time";
 import {
-  DQ_CONSUMPTION_TOLERANCE,
-  DQ_STD_RATIO,
-  PERSISTENT_DEVIATION,
-  SUSTAINED_HOURS,
-  Z_THRESHOLD,
+  DEFAULT_ANALYSIS_CONFIG,
+  type AnalysisConfig,
   type ConsolidatedSignals,
   type Detection,
   type ConsolidatedDetection,
@@ -41,6 +38,8 @@ export type {
   ReadingPoint,
   VariableEvidence,
 } from "../analysis.domain";
+
+export type { AnalysisConfig } from "../analysis.domain";
 
 type Signal = keyof MeterBaseline;
 
@@ -78,7 +77,11 @@ function groupByDay(readings: ReadingPoint[]): Map<number, ReadingPoint[]> {
   return groups;
 }
 
-function detectSpikes(readings: ReadingPoint[], baseline: MeterBaseline): Detection[] {
+function detectSpikes(
+  readings: ReadingPoint[],
+  baseline: MeterBaseline,
+  config: AnalysisConfig,
+): Detection[] {
   const { mean: mu, std: sigma } = baseline.consumption_kwh;
   if (mu === null || sigma === null || sigma === 0) return [];
 
@@ -97,7 +100,7 @@ function detectSpikes(readings: ReadingPoint[], baseline: MeterBaseline): Detect
         const stats = baseline[signal as Signal];
         if (stats.mean === null || stats.std === null || stats.std === 0) return false;
         return signalValues(signal as Signal, run).some(
-          (value) => Math.abs(zScore(value, stats.mean, stats.std) ?? 0) > Z_THRESHOLD,
+          (value) => Math.abs(zScore(value, stats.mean, stats.std) ?? 0) > config.zThreshold,
         );
       });
       detections.push({
@@ -115,7 +118,7 @@ function detectSpikes(readings: ReadingPoint[], baseline: MeterBaseline): Detect
   for (let i = 0; i < readings.length; i++) {
     const reading = readings[i]!;
     const z = zScore(reading.consumptionKwh, mu, sigma) ?? 0;
-    if (Math.abs(z) > Z_THRESHOLD) {
+    if (Math.abs(z) > config.zThreshold) {
       const prev = run[run.length - 1];
       if (prev && reading.timestamp.getTime() - prev.timestamp.getTime() > HOUR_MS + 1000) {
         flush();
@@ -136,7 +139,11 @@ function detectSpikes(readings: ReadingPoint[], baseline: MeterBaseline): Detect
  * dirección, abre una ventana de cambio que se extiende por los bloques de día
  * consecutivos desviados.
  */
-function detectPersistentChange(readings: ReadingPoint[], baseline: MeterBaseline): Detection[] {
+function detectPersistentChange(
+  readings: ReadingPoint[],
+  baseline: MeterBaseline,
+  config: AnalysisConfig,
+): Detection[] {
   const { mean: mu, std: sigma } = baseline.consumption_kwh;
   if (mu === null || sigma === null || sigma === 0 || readings.length === 0) return [];
 
@@ -159,7 +166,7 @@ function detectPersistentChange(readings: ReadingPoint[], baseline: MeterBaselin
   for (const key of dayKeys) {
     if (key <= firstDay + 6 * DAY_MS) continue; // se excluye la ventana de baseline
     const dev = deviation(blockMean(key));
-    if (dev === null || Math.abs(dev) <= PERSISTENT_DEVIATION) continue;
+    if (dev === null || Math.abs(dev) <= config.persistentDeviation) continue;
     const direction = Math.sign(dev);
 
     const bucket = groups.find(([k]) => k === key)?.[1] ?? [];
@@ -170,17 +177,17 @@ function detectPersistentChange(readings: ReadingPoint[], baseline: MeterBaselin
       const matches =
         rDev !== null &&
         Math.sign(rDev) === direction &&
-        Math.abs(rDev) > PERSISTENT_DEVIATION;
+        Math.abs(rDev) > config.persistentDeviation;
       consecutive = matches ? consecutive + 1 : 0;
       best = Math.max(best, consecutive);
     }
-    if (best < SUSTAINED_HOURS) continue;
+    if (best < config.sustainedHours) continue;
 
     const nextDayDev = deviation(blockMean(key + DAY_MS));
     if (
       nextDayDev === null ||
       Math.sign(nextDayDev) !== direction ||
-      Math.abs(nextDayDev) <= PERSISTENT_DEVIATION
+      Math.abs(nextDayDev) <= config.persistentDeviation
     ) {
       continue;
     }
@@ -197,7 +204,11 @@ function detectPersistentChange(readings: ReadingPoint[], baseline: MeterBaselin
   for (const key of dayKeys) {
     if (key <= changeStartKey) continue;
     const dev = deviation(blockMean(key));
-    if (dev !== null && Math.sign(dev) === direction && Math.abs(dev) > PERSISTENT_DEVIATION) {
+    if (
+      dev !== null &&
+      Math.sign(dev) === direction &&
+      Math.abs(dev) > config.persistentDeviation
+    ) {
       changeEndKey = key;
     } else {
       break;
@@ -216,7 +227,10 @@ function detectPersistentChange(readings: ReadingPoint[], baseline: MeterBaselin
       const stats = baseline[signal as Signal];
       if (stats.mean === null || stats.mean === 0) return false;
       const postMean = mean(signalValues(signal as Signal, postReadings));
-      return postMean !== null && Math.abs((postMean - stats.mean) / stats.mean) > PERSISTENT_DEVIATION;
+      return (
+        postMean !== null &&
+        Math.abs((postMean - stats.mean) / stats.mean) > config.persistentDeviation
+      );
     },
   );
 
@@ -244,7 +258,11 @@ function detectPersistentChange(readings: ReadingPoint[], baseline: MeterBaselin
  * pero la std de voltaje o factor de potencia supera 5x el baseline
  * (incoherencia eléctrica).
  */
-function detectDataQuality(readings: ReadingPoint[], baseline: MeterBaseline): Detection[] {
+function detectDataQuality(
+  readings: ReadingPoint[],
+  baseline: MeterBaseline,
+  config: AnalysisConfig,
+): Detection[] {
   const { mean: mu } = baseline.consumption_kwh;
   if (mu === null) return [];
 
@@ -254,14 +272,14 @@ function detectDataQuality(readings: ReadingPoint[], baseline: MeterBaseline): D
   for (const [key, bucket] of groups) {
     const cMean = mean(bucket.map((r) => r.consumptionKwh));
     if (cMean === null || mu === 0) continue;
-    if (Math.abs((cMean - mu) / mu) >= DQ_CONSUMPTION_TOLERANCE) continue;
+    if (Math.abs((cMean - mu) / mu) >= config.dqConsumptionTolerance) continue;
 
     const voltageRatio =
       (populationStd(signalValues("voltage_v", bucket)) ?? 0) / (baseline.voltage_v.std ?? 1);
     const pfRatio =
       (populationStd(signalValues("power_factor", bucket)) ?? 0) / (baseline.power_factor.std ?? 1);
 
-    if (voltageRatio > DQ_STD_RATIO || pfRatio > DQ_STD_RATIO) {
+    if (voltageRatio > config.dqStdRatio || pfRatio > config.dqStdRatio) {
       dqDays.push({ key, voltageRatio, pfRatio });
     }
   }
@@ -297,11 +315,12 @@ function detectDataQuality(readings: ReadingPoint[], baseline: MeterBaseline): D
 export function detectMeter(
   readings: ReadingPoint[],
   baseline: MeterBaseline,
+  config: AnalysisConfig = DEFAULT_ANALYSIS_CONFIG,
 ): Detection[] {
   return [
-    ...detectSpikes(readings, baseline),
-    ...detectPersistentChange(readings, baseline),
-    ...detectDataQuality(readings, baseline),
+    ...detectSpikes(readings, baseline, config),
+    ...detectPersistentChange(readings, baseline, config),
+    ...detectDataQuality(readings, baseline, config),
   ];
 }
 

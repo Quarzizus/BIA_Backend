@@ -25,6 +25,35 @@ export const nearMissWindowMs = 6 * 60 * 60 * 1000;
 export const LLM_Z_MIN = 2.5;
 export const LLM_Z_MAX = 3;
 
+/**
+ * Umbrales del pipeline configurables (F7): el servicio acepta un override y
+ * los defaults viven aquí — los literales de detector/clasificador ya no son
+ * la única fuente. `zThreshold`/`persistentDeviation`/`sustainedHours`/
+ * `dqConsumptionTolerance`/`dqStdRatio` alimentan al detector; `llmZMin`/
+ * `llmZMax`/`nearMissWindowMs` al clasificador.
+ */
+export interface AnalysisConfig {
+  zThreshold: number;
+  persistentDeviation: number;
+  sustainedHours: number;
+  dqConsumptionTolerance: number;
+  dqStdRatio: number;
+  llmZMin: number;
+  llmZMax: number;
+  nearMissWindowMs: number;
+}
+
+export const DEFAULT_ANALYSIS_CONFIG: AnalysisConfig = {
+  zThreshold: Z_THRESHOLD,
+  persistentDeviation: PERSISTENT_DEVIATION,
+  sustainedHours: SUSTAINED_HOURS,
+  dqConsumptionTolerance: DQ_CONSUMPTION_TOLERANCE,
+  dqStdRatio: DQ_STD_RATIO,
+  llmZMin: LLM_Z_MIN,
+  llmZMax: LLM_Z_MAX,
+  nearMissWindowMs,
+};
+
 /** Severidad → confianza persistida en cada anomalía (diseño D4/D7). */
 export const SEVERITY_CONFIDENCE: Record<Severity, number> = {
   HIGH: 0.99,

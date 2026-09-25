@@ -30,6 +30,14 @@ describe("createApp wiring", () => {
     expect(body.status).toBe("ok");
   });
 
+  test("CORS is enabled for direct frontend calls (F11)", async () => {
+    const res = await fetch(`${baseUrl}/meters`, {
+      headers: { Origin: "http://localhost:5173" },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("access-control-allow-origin")).toBe("*");
+  });
+
   test("meters, readings, anomalies and dashboard routers are wired", async () => {
     const meters = await fetch(`${baseUrl}/meters`);
     expect(meters.status).toBe(200);

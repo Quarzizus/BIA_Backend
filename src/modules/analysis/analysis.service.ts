@@ -1,18 +1,29 @@
 import type { Meter, PrismaClient, Reading } from "../../generated/prisma/client";
 import { ApiError } from "../../shared/errors";
 import type { LlmEnv } from "../../shared/domain/llm";
-import { normalizeAction, normalizeActionSimple, normalizeReason, normalizeReasonSimple } from "../../shared/domain/llm-format";
+import {
+  actionSimpleWasTruncated,
+  actionWasTruncated,
+  normalizeAction,
+  normalizeActionSimple,
+  normalizeReason,
+  normalizeReasonSimple,
+  reasonSimpleWasTruncated,
+  reasonWasTruncated,
+} from "../../shared/domain/llm-format";
 import { logger } from "../../shared/logger";
 import { computeBaseline } from "./stages/analysis.baseline.calculator";
 import { classifyAnomaly, coveringEvent, type MeterEvent } from "./stages/analysis.classifier";
 import { consolidateDetections, detectMeter } from "./stages/analysis.detector";
 import {
+  DEFAULT_ANALYSIS_CONFIG,
   FALLBACK_ACTION,
   FALLBACK_ACTION_SIMPLE,
   FALLBACK_REASON,
   FALLBACK_REASON_SIMPLE,
   LLM_CONCURRENCY,
   SEVERITY_CONFIDENCE,
+  type AnalysisConfig,
 } from "./analysis.domain";
 import type { LlmClient } from "./llm/analysis.llm.client";
 import {
@@ -29,12 +40,16 @@ import {
  *    concurrencia acotada (LLM_CONCURRENCY) y persiste UNA anomalía consolidada
  *    por medidor afectado + el status de medidor recalculado en una sola
  *    transacción. Si una anomalía OPEN previa tiene la MISMA evidencia
- *    (detectionType + signals), se reutilizan sus explicaciones y NO se llama
- *    al LLM (llm_used=false): re-runs sobre datos sin cambios son casi
- *    instantáneos. Fallback por reglas POR MEDIDOR si el LLM falla (explicación
- *    en español, llm_used=false para esa llamada): un timeout en un medidor no
+ *    (detectionType + signals) y su texto proviene del LLM (llmGenerated=true),
+ *    se reutilizan sus explicaciones y NO se llama al LLM (llm_used=false):
+ *    re-runs sobre datos sin cambios son casi instantáneos. Los textos de
+ *    fallback por reglas NUNCA se cachean (F2): un LLM recuperado vuelve a
+ *    explicar. Fallback por reglas POR MEDIDOR si el LLM falla (explicación en
+ *    español, llmGenerated=false para esa fila): un timeout en un medidor no
  *    borra los hallazgos del resto.
- *  - getStatus(): contrato de polling para GET /ai/analysis/:id.
+ *  - getStatus(): contrato de polling para GET /ai/analysis/:id. F4:
+ *    anomaly_count cuenta las anomalías CREADAS por el run (el refresh no
+ *    re-parenta analysisRunId; el resumen distingue "(X new, Y refreshed)").
  *
  * Solo orquestación: toda la persistencia vive en analysis.repository, los
  * tipos/constantes de dominio puro en analysis.domain, y las reglas compartidas
@@ -63,7 +78,11 @@ export function createAnalysisService(
   prisma: PrismaClient,
   llm: LlmClient,
   env: AnalysisDeps,
+  config: Partial<AnalysisConfig> = {},
 ): AnalysisService {
+  // F7: los umbrales por defecto viven en DEFAULT_ANALYSIS_CONFIG; un override
+  // parcial del caller solo cambia los que especifica.
+  const resolvedConfig: AnalysisConfig = { ...DEFAULT_ANALYSIS_CONFIG, ...config };
   const repository: AnalysisRepository = createAnalysisRepository(prisma);
 
   const assertConfigured = () => {
@@ -87,34 +106,44 @@ export function createAnalysisService(
     if (baseline.consumption_kwh.mean === null) return { finding: null, llmUsed: false };
 
     const consolidated = consolidateDetections(
-      detectMeter(meterReadings, baseline),
+      detectMeter(meterReadings, baseline, resolvedConfig),
       meterReadings,
       baseline,
     );
     if (!consolidated) return { finding: null, llmUsed: false };
 
-    const classification = classifyAnomaly({
-      detectionType: consolidated.detectionType,
-      rangeStart: consolidated.rangeStart,
-      rangeEnd: consolidated.rangeEnd,
-      maxZ: consolidated.maxZ,
-      events,
-    });
+    const classification = classifyAnomaly(
+      {
+        detectionType: consolidated.detectionType,
+        rangeStart: consolidated.rangeStart,
+        rangeEnd: consolidated.rangeEnd,
+        maxZ: consolidated.maxZ,
+        events,
+      },
+      resolvedConfig,
+    );
 
     let type = classification.type;
     let severity = classification.severity;
+    // F5: por defecto la confianza de la clasificación POR REGLAS (no hay
+    // confianza de un modelo); si el LLM clasifica, se usa su confidence.
     let confidence = SEVERITY_CONFIDENCE[severity];
     let reason: string;
     let recommendedAction: string;
     let reasonSimple: string;
     let recommendedActionSimple: string;
     let llmUsed = false;
+    // F2: origen de los textos persistidos — true solo si vienen del LLM
+    // (producidos este run o reutilizados de una fila LLM cacheada).
+    let llmGenerated = false;
 
     // Caché de explicaciones: si una anomalía OPEN previa tiene la MISMA
-    // evidencia (mismo detectionType + mismo signals), se reutilizan sus textos
-    // y NO se llama al LLM (llm_used=false): re-runs sobre datos sin cambios
-    // son casi instantáneos. El fingerprint ignora rangos/eventos a propósito:
-    // la evidencia persistida es la que define la anomalía.
+    // evidencia (mismo detectionType + mismo signals) y su texto proviene del
+    // LLM (llmGenerated=true), se reutilizan sus textos y NO se llama al LLM
+    // (llm_used=false): re-runs sobre datos sin cambios son casi instantáneos.
+    // El fingerprint ignora rangos/eventos a propósito: la evidencia persistida
+    // es la que define la anomalía. Los textos de fallback por reglas NUNCA se
+    // cachean (F2): un LLM recuperado vuelve a explicar el caso.
     const cached = await repository.findOpenMatchingEvidence(
       meter.id,
       consolidated.detectionType,
@@ -129,6 +158,7 @@ export function createAnalysisService(
       recommendedAction = cached.recommendedAction;
       reasonSimple = cached.reasonSimple;
       recommendedActionSimple = cached.recommendedActionSimple;
+      llmGenerated = true;
     } else if (classification.needsLlm) {
       // Caso límite: el LLM clasifica la situación ambigua. Si el proveedor
       // falla, se conserva la clasificación determinista por reglas.
@@ -139,15 +169,22 @@ export function createAnalysisService(
           signals: consolidated.signals,
           rangeStart: consolidated.rangeStart.toISOString(),
           rangeEnd: consolidated.rangeEnd.toISOString(),
+          // F3: los eventos del medidor viajan al clasificador — son la razón
+          // de la ambigüedad del caso límite.
+          events: events.map((event) => ({
+            eventType: event.eventType,
+            eventTimestamp: event.eventTimestamp.toISOString(),
+          })),
         });
         type = llmResult.type;
         severity = llmResult.severity;
-        confidence = SEVERITY_CONFIDENCE[severity];
+        confidence = llmResult.confidence;
         reason = llmResult.reason;
         recommendedAction = llmResult.recommended_action;
         reasonSimple = llmResult.reason_simple;
         recommendedActionSimple = llmResult.recommended_action_simple;
         llmUsed = true;
+        llmGenerated = true;
       } catch (err) {
         logger.warn("LLM no disponible para clasificar; se usa la clasificación por reglas", {
           meterId: meter.meterId,
@@ -186,6 +223,7 @@ export function createAnalysisService(
         reasonSimple = explanation.reason_simple;
         recommendedActionSimple = explanation.recommended_action_simple;
         llmUsed = true;
+        llmGenerated = true;
       } catch (err) {
         logger.warn("LLM no disponible para explicar; se genera una explicación por reglas", {
           meterId: meter.meterId,
@@ -206,6 +244,28 @@ export function createAnalysisService(
         );
         recommendedActionSimple = FALLBACK_ACTION_SIMPLE[type];
       }
+    }
+
+    // Punto único de normalización: garantiza el contrato de formato para
+    // TANTO la salida del LLM como el fallback por reglas (idempotente).
+    const normalizedReason = normalizeReason(reason);
+    const normalizedAction = normalizeAction(recommendedAction);
+    const normalizedReasonSimple = normalizeReasonSimple(reasonSimple);
+    const normalizedActionSimple = normalizeActionSimple(recommendedActionSimple);
+
+    // F9: si el crudo excedía el tope del contrato y el normalizador descartó
+    // contenido, se avisa con el contexto de la anomalía (observabilidad).
+    if (
+      reasonWasTruncated(reason, normalizedReason) ||
+      reasonSimpleWasTruncated(reasonSimple, normalizedReasonSimple) ||
+      actionWasTruncated(recommendedAction, normalizedAction) ||
+      actionSimpleWasTruncated(recommendedActionSimple, normalizedActionSimple)
+    ) {
+      logger.warn("texto del LLM truncado por el normalizador de formato", {
+        meterId: meter.meterId,
+        detectionType: consolidated.detectionType,
+        llmGenerated,
+      });
     }
 
     // Evento relacionado: se reutiliza la regla de cobertura del clasificador
@@ -231,15 +291,13 @@ export function createAnalysisService(
         severity,
         confidence,
         signals: consolidated.signals,
-        // Punto único de normalización: garantiza el contrato de formato para
-        // TANTO la salida del LLM como el fallback por reglas (idempotente).
-        // Las cuatro explicaciones (técnica + simple) pasan por su normalizador.
-        reason: normalizeReason(reason),
-        recommendedAction: normalizeAction(recommendedAction),
-        reasonSimple: normalizeReasonSimple(reasonSimple),
-        recommendedActionSimple: normalizeActionSimple(recommendedActionSimple),
+        reason: normalizedReason,
+        recommendedAction: normalizedAction,
+        reasonSimple: normalizedReasonSimple,
+        recommendedActionSimple: normalizedActionSimple,
         relatedEventId: relatedEvent?.id ?? null,
         llmUsed,
+        llmGenerated,
       },
       llmUsed,
     };
@@ -252,6 +310,9 @@ export function createAnalysisService(
       : meters;
 
     const findings: AnalysisFinding[] = [];
+    // F6: medidores que fallaron con un error inesperado (catch defensivo) —
+    // se registran en el resumen del run para no silenciarlos.
+    let failedMeters = 0;
     // Concurrencia acotada: el LLM es el cuello de botella (rate limits del
     // proveedor), así que los medidores se procesan en lotes de LLM_CONCURRENCY
     // con Promise.all. El orden de findings se conserva (lotes en orden, medidor
@@ -268,6 +329,7 @@ export function createAnalysisService(
             );
           } catch (err) {
             // Defensivo: un fallo inesperado en un medidor no debe matar el run.
+            failedMeters++;
             logger.warn("medidor omitido por error inesperado durante el análisis", {
               meterId: meter.meterId,
               error: err instanceof Error ? err.message : String(err),
@@ -283,7 +345,12 @@ export function createAnalysisService(
 
     // llm_used del run: true si CUALQUIER hallazgo usó el LLM en este run.
     const llmUsed = findings.some((finding) => finding.llmUsed);
-    const summary = `Detected ${findings.length} anomaly(ies) across ${new Set(findings.map((finding) => finding.meterId)).size} meter(s)`;
+    let summary = `Detected ${findings.length} anomaly(ies) across ${new Set(findings.map((finding) => finding.meterId)).size} meter(s)`;
+    // F6: los fallos por medidor se reflejan en el resumen (persistFindings
+    // añade después "(X new, Y refreshed)").
+    if (failedMeters > 0) {
+      summary += `; ${failedMeters} meter${failedMeters === 1 ? "" : "s"} failed`;
+    }
     await repository.persistFindings(runId, findings, summary, llmUsed);
   }
 

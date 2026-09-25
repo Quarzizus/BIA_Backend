@@ -175,3 +175,77 @@ export function normalizeAction(raw: string): string {
 export function normalizeActionSimple(raw: string): string {
   return buildActionItems(raw, MAX_ACTION_SIMPLE_ITEMS);
 }
+
+/**
+ * Conteo de "grupos de contenido" del texto crudo, según el contrato:
+ *  - párrafos si ya hay separación "\n\n" (el colapso de 3+ saltos no altera
+ *    el conteo), o frases si es un bloque único;
+ *  - items (líneas) si hay saltos de línea, o frases si es un bloque único.
+ * Se usa para detectar cuándo el normalizador descartó contenido (F9).
+ */
+function countRawGroups(text: string): number {
+  const trimmed = text.trim();
+  if (trimmed === "") return 0;
+  const collapsed = trimmed.replace(COLLAPSE_BREAKS, "\n\n");
+  if (collapsed.includes("\n\n")) {
+    return collapsed
+      .split(/\n\s*\n/)
+      .map((paragraph) => paragraph.trim())
+      .filter((paragraph) => paragraph.length > 0).length;
+  }
+  if (collapsed.includes("\n")) {
+    return collapsed
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0).length;
+  }
+  return splitSentences(collapsed).length;
+}
+
+function countNormalizedGroups(text: string): number {
+  const trimmed = text.trim();
+  if (trimmed === "") return 0;
+  if (trimmed.includes("\n")) {
+    return trimmed
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0).length;
+  }
+  return trimmed.split(/\n\s*\n/).filter((paragraph) => paragraph.trim().length > 0).length;
+}
+
+/**
+ * ¿El normalizador descartó contenido de `raw` al producir `normalized`?
+ * true si el texto crudo excede el tope de párrafos del contrato de reason
+ * (3) y la normalización quedó más corta que el crudo.
+ */
+export function reasonWasTruncated(raw: string, normalized: string): boolean {
+  return (
+    countRawGroups(raw) > MAX_REASON_PARAGRAPHS &&
+    countNormalizedGroups(normalized) < countRawGroups(raw)
+  );
+}
+
+/** Igual que `reasonWasTruncated` pero con el tope simple (2 párrafos). */
+export function reasonSimpleWasTruncated(raw: string, normalized: string): boolean {
+  return (
+    countRawGroups(raw) > MAX_REASON_SIMPLE_PARAGRAPHS &&
+    countNormalizedGroups(normalized) < countRawGroups(raw)
+  );
+}
+
+/** ¿El normalizador descartó items de `raw`? Tope del contrato de action: 4. */
+export function actionWasTruncated(raw: string, normalized: string): boolean {
+  return (
+    countRawGroups(raw) > MAX_ACTION_ITEMS &&
+    countNormalizedGroups(normalized) < countRawGroups(raw)
+  );
+}
+
+/** Igual que `actionWasTruncated` pero con el tope simple (3 items). */
+export function actionSimpleWasTruncated(raw: string, normalized: string): boolean {
+  return (
+    countRawGroups(raw) > MAX_ACTION_SIMPLE_ITEMS &&
+    countNormalizedGroups(normalized) < countRawGroups(raw)
+  );
+}

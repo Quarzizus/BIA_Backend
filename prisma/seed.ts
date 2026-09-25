@@ -52,6 +52,29 @@ export function normalizeTimestampToUtc(raw: string): Date {
   return new Date(`${normalized}Z`);
 }
 
+/**
+ * F8: convierte un campo numérico del CSV a number con validación explícita.
+ * Un valor que no parsea (NaN) rompe el seed con un error claro en vez de
+ * persistir silenciosamente un número corrupto en la base.
+ */
+export function parseNumericCsvField(
+  raw: string,
+  field: string,
+  context: { meterId?: string; timestamp?: string } = {},
+): number {
+  // Número("") === 0: un campo vacío no debe silenciosamente volverse 0.
+  if (raw.trim() === "") {
+    const where = context.meterId ? ` (meter ${context.meterId}${context.timestamp ? `, ${context.timestamp}` : ""})` : "";
+    throw new Error(`seed: empty value for numeric field "${field}"${where}`);
+  }
+  const parsed = Number(raw);
+  if (Number.isNaN(parsed)) {
+    const where = context.meterId ? ` (meter ${context.meterId}${context.timestamp ? `, ${context.timestamp}` : ""})` : "";
+    throw new Error(`seed: invalid numeric value "${raw}" for field "${field}"${where}`);
+  }
+  return parsed;
+}
+
 export function splitCsvLine(line: string): string[] {
   const values: string[] = [];
   let current = "";
@@ -111,6 +134,17 @@ export async function seed(): Promise<void> {
     }
   }
 
+  // F8: valida los campos numéricos de readings.csv ANTES de tocar la base —
+  // un valor que no parsea (NaN) rompe el seed con un error claro, incluso en
+  // un re-run idempotente que de otro modo haría skip.
+  for (const reading of readings) {
+    const context = { meterId: reading.meter_id, timestamp: reading.timestamp };
+    parseNumericCsvField(reading.consumption_kwh, "consumption_kwh", context);
+    parseNumericCsvField(reading.voltage_v, "voltage_v", context);
+    parseNumericCsvField(reading.current_a, "current_a", context);
+    parseNumericCsvField(reading.power_factor, "power_factor", context);
+  }
+
   const [meterCount, readingCount, eventCount] = await Promise.all([
     prisma.meter.count(),
     prisma.reading.count(),
@@ -150,10 +184,22 @@ export async function seed(): Promise<void> {
       data: readings.map((reading) => ({
         meterId: meterIdByCode.get(reading.meter_id)!,
         timestamp: normalizeTimestampToUtc(reading.timestamp),
-        consumptionKwh: Number(reading.consumption_kwh),
-        voltageV: Number(reading.voltage_v),
-        currentA: Number(reading.current_a),
-        powerFactor: Number(reading.power_factor),
+        consumptionKwh: parseNumericCsvField(reading.consumption_kwh, "consumption_kwh", {
+          meterId: reading.meter_id,
+          timestamp: reading.timestamp,
+        }),
+        voltageV: parseNumericCsvField(reading.voltage_v, "voltage_v", {
+          meterId: reading.meter_id,
+          timestamp: reading.timestamp,
+        }),
+        currentA: parseNumericCsvField(reading.current_a, "current_a", {
+          meterId: reading.meter_id,
+          timestamp: reading.timestamp,
+        }),
+        powerFactor: parseNumericCsvField(reading.power_factor, "power_factor", {
+          meterId: reading.meter_id,
+          timestamp: reading.timestamp,
+        }),
         status: reading.status,
       })),
     });

@@ -20,6 +20,8 @@ export interface ClassifyInput {
   signals: Record<string, unknown>;
   rangeStart: string;
   rangeEnd: string;
+  /** Eventos del medidor (razón de la ambigüedad del caso límite), ISO 8601. */
+  events: Array<{ eventType: string; eventTimestamp: string }>;
 }
 
 export interface ClassifyOutput {
@@ -29,6 +31,8 @@ export interface ClassifyOutput {
   recommended_action: string;
   reason_simple: string;
   recommended_action_simple: string;
+  /** Confianza del modelo en la clasificación (0-1). */
+  confidence: number;
 }
 
 export interface ExplainInput {

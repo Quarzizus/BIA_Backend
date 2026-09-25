@@ -30,6 +30,27 @@ const classifySchema = z.object({
   recommended_action: z.string().min(1),
   reason_simple: z.string().min(1),
   recommended_action_simple: z.string().min(1),
+  // Confianza del modelo en la clasificación (F5): 0-1, honesta con el origen.
+  confidence: z.number().min(0).max(1),
+});
+
+/**
+ * Validación del INPUT de classify (F3): los eventos del medidor viajan al
+ * modelo como parte del caso — son la razón de la ambigüedad. Fail-fast si el
+ * array de eventos está malformado.
+ */
+const classifyInputSchema = z.object({
+  meterId: z.string().min(1),
+  detectionType: z.string().min(1),
+  signals: z.record(z.string(), z.unknown()),
+  rangeStart: z.string().min(1),
+  rangeEnd: z.string().min(1),
+  events: z.array(
+    z.object({
+      eventType: z.string().min(1),
+      eventTimestamp: z.string().min(1),
+    }),
+  ),
 });
 
 type JsonInput = Record<string, unknown>;
@@ -130,14 +151,19 @@ export async function classifyWithLlm(
   env: LlmEnv,
   input: ClassifyInput,
 ): Promise<ClassifyOutput> {
+  const inputCheck = classifyInputSchema.safeParse(input);
+  if (!inputCheck.success) {
+    throw new Error(`LLM classify input failed validation: ${inputCheck.error.message}`);
+  }
   const task = [
     "Clasifica la siguiente anomalía eléctrica ambigua (estadística o evento cercano sin cobertura).",
     "Devuelve type (REAL_ANOMALY | EXPLAINABLE_ANOMALY | FALSE_POSITIVE | DATA_QUALITY),",
-    "severity (HIGH | MEDIUM | LOW), reason, recommended_action, reason_simple y recommended_action_simple.",
+    "severity (HIGH | MEDIUM | LOW), reason, recommended_action, reason_simple, recommended_action_simple y confidence (0-1).",
     'Formato de reason: 2-3 párrafos cortos separados por una línea en blanco ("\\n\\n"), cada párrafo de 1-3 frases; NO devuelvas un muro de texto.',
     'Formato de recommended_action: lista de 2-4 items, cada uno en su línea con prefijo "- " y una sola frase imperativa en español; NO numeres con "1)" ni "2.".',
     'Formato de reason_simple: 1-2 párrafos de 1-2 frases cada uno, lenguaje cotidiano SIN jerga técnica.',
     'Formato de recommended_action_simple: 2-3 pasos cotidianos con prefijo "- ", que cualquier persona pueda seguir.',
+    "Los eventos listados en `events` son la razón de la ambigüedad: si uno explica la señal dentro del rango, clasifica como EXPLAINABLE_ANOMALY o FALSE_POSITIVE; si el evento es cercano pero no cubre el rango (near-miss), usa tu criterio y refleja la duda en confidence.",
   ].join("\n");
   const data = await completeJson(env, task, { ...input }, classifySchema as z.ZodType<unknown>);
   return data as unknown as ClassifyOutput;

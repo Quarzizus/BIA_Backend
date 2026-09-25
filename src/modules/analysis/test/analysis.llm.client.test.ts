@@ -13,6 +13,10 @@ const classifyInput = {
   signals: { max_z: 2.8, variables: ["consumption_kwh"] },
   rangeStart: "2026-09-12T14:00:00.000Z",
   rangeEnd: "2026-09-12T18:00:00.000Z",
+  // F3: los eventos viajan al modelo — son la razón de la ambigüedad.
+  events: [
+    { eventType: "OPERATIONAL_CHANGE", eventTimestamp: "2026-09-12T12:00:00.000Z" },
+  ],
 };
 
 const explainInput = {
@@ -59,6 +63,7 @@ describe("createLlmClient — classify", () => {
               content: JSON.stringify({
                 type: "REAL_ANOMALY",
                 severity: "HIGH",
+                confidence: 0.9,
                 reason: "Consumo anómalo detectado",
                 recommended_action: "Revisar instalación",
                 reason_simple: "El consumo subió de forma notoria.",
@@ -74,6 +79,7 @@ describe("createLlmClient — classify", () => {
       const result = await client.classify(classifyInput);
       expect(result.type).toBe("REAL_ANOMALY");
       expect(result.severity).toBe("HIGH");
+      expect(result.confidence).toBe(0.9);
       expect(result.reason).toContain("anómalo");
       expect(result.recommended_action).toBe("Revisar instalación");
       expect(result.reason_simple).toContain("consumo");
@@ -86,6 +92,104 @@ describe("createLlmClient — classify", () => {
       const body = JSON.parse(fetchCalls[0]!.init.body as string);
       expect(body.model).toBe("test-model");
       expect(body.messages.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      restore();
+    }
+  });
+
+  test("embeds the meter events in the classify prompt (F3)", async () => {
+    const restore = mockFetch(
+      jsonResponse({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                type: "FALSE_POSITIVE",
+                severity: "LOW",
+                confidence: 0.8,
+                reason: "El evento explica la señal.",
+                recommended_action: "Confirmar el evento.",
+                reason_simple: "El evento programado explica la caída.",
+                recommended_action_simple: "Confirmar el evento.",
+              }),
+            },
+          },
+        ],
+      }),
+    );
+    try {
+      const client = createLlmClient(env);
+      await client.classify(classifyInput);
+      const body = JSON.parse(fetchCalls[0]!.init.body as string);
+      const userContent = body.messages.find((m: any) => m.role === "user").content as string;
+      // El caso (payload) incluye los eventos y el prompt los señala como causa
+      // de la ambigüedad.
+      expect(userContent).toContain("OPERATIONAL_CHANGE");
+      expect(userContent).toContain("2026-09-12T12:00:00.000Z");
+      expect(userContent).toContain("eventos");
+    } finally {
+      restore();
+    }
+  });
+
+  test("rejects a confidence out of range 0-1 in the response (F5)", async () => {
+    const restore = mockFetch(
+      jsonResponse({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                type: "REAL_ANOMALY",
+                severity: "HIGH",
+                confidence: 1.5,
+                reason: "Consumo anómalo detectado",
+                recommended_action: "Revisar instalación",
+                reason_simple: "El consumo subió de forma notoria.",
+                recommended_action_simple: "Revisa la instalación del medidor.",
+              }),
+            },
+          },
+        ],
+      }),
+    );
+    try {
+      const client = createLlmClient(env);
+      await expect(client.classify(classifyInput)).rejects.toThrow(/failed validation/);
+    } finally {
+      restore();
+    }
+  });
+
+  test("rejects classify input with a malformed events array (F3)", async () => {
+    const restore = mockFetch(
+      jsonResponse({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                type: "REAL_ANOMALY",
+                severity: "HIGH",
+                confidence: 0.9,
+                reason: "r",
+                recommended_action: "a",
+                reason_simple: "s",
+                recommended_action_simple: "s",
+              }),
+            },
+          },
+        ],
+      }),
+    );
+    try {
+      const client = createLlmClient(env);
+      await expect(
+        client.classify({
+          ...classifyInput,
+          events: [{ eventType: "", eventTimestamp: "not-a-date" }],
+        }),
+      ).rejects.toThrow(/input failed validation/);
+      // Fail-fast: la request nunca llega al proveedor.
+      expect(fetchCalls).toHaveLength(0);
     } finally {
       restore();
     }

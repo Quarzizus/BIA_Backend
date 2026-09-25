@@ -21,6 +21,7 @@ function fakeLlm(): LlmClient {
       return {
         type: "REAL_ANOMALY",
         severity: "HIGH",
+        confidence: 0.9,
         reason: "Caso límite clasificado por el modelo.",
         recommended_action: "Revisar manualmente.",
         reason_simple: "El consumo subió de forma notoria. Algo se conectó o se dañó en la instalación.",

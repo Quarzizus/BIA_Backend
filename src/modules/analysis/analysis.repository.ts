@@ -1,4 +1,4 @@
-import type { AnalysisRun, Meter, Prisma, PrismaClient, Reading } from "../../generated/prisma/client";
+import type { AnalysisRun, Meter, PrismaClient, Reading } from "../../generated/prisma/client";
 import type { AnomalyType, Severity } from "../../generated/prisma/enums";
 import { deriveMeterStatus } from "../../shared/domain/meter-status";
 import type { MeterEvent } from "./analysis.domain";
@@ -28,6 +28,8 @@ export interface AnalysisFinding {
   relatedEventId: string | null;
   /** true si el LLM fue llamado y respondió en ESTE run; false en fallback y caché. */
   llmUsed: boolean;
+  /** Origen de los textos persistidos: true si el LLM los produjo (o se reutilizan de una fila LLM), false si son fallback por reglas. */
+  llmGenerated: boolean;
 }
 
 /**
@@ -61,7 +63,9 @@ export interface AnalysisRepository {
   ): Promise<{ id: string } | null>;
   /**
    * Caché de explicaciones: devuelve la anomalía OPEN del medidor cuya evidencia
-   * coincide con la actual (mismo detectionType + mismo signals JSON), o null.
+   * coincide con la actual (mismo detectionType + mismo signals JSON) y cuyo
+   * texto proviene del LLM (llmGenerated=true), o null. Las filas de fallback
+   * por reglas nunca se reutilizan (F2).
    */
   findOpenMatchingEvidence(
     meterId: string,
@@ -79,21 +83,21 @@ export interface AnalysisRepository {
   countAnomalies(runId: string): Promise<number>;
 }
 
+/** Fila activa (status != RESOLVED) pre-fetchada para el upsert y el recompute de Meter.status. */
+interface ActiveAnomalyRow {
+  id: string;
+  type: AnomalyType;
+  severity: Severity;
+  status: string;
+}
+
 /**
  * Helper del upsert de hallazgos: devuelve la anomalía OPEN del medidor con el
  * mismo tipo, si existe. Solo las OPEN entran en el set activo — las RESOLVED
  * son historial y no bloquean la creación de una fila nueva.
+ * (Eliminado el findFirst por hallazgo: F10 pre-fetcha todas las filas activas
+ * en una sola consulta y decide en JS.)
  */
-async function findOpenByMeterAndType(
-  tx: Prisma.TransactionClient,
-  meterId: string,
-  type: AnomalyType,
-): Promise<{ id: string } | null> {
-  return tx.anomaly.findFirst({
-    where: { meterId, type: type as never, status: "OPEN" },
-    select: { id: true },
-  });
-}
 
 /**
  * Serialización canónica (claves ordenadas recursivamente) para comparar
@@ -158,8 +162,11 @@ export function createAnalysisRepository(prisma: PrismaClient): AnalysisReposito
     },
 
     async findOpenMatchingEvidence(meterId, detectionType, signals) {
+      // F2: solo las filas cuyo TEXTO proviene del LLM (llmGenerated=true) son
+      // reutilizables. Las de fallback por reglas no se cachean: el próximo run
+      // re-intenta el LLM para explicar el caso con el modelo recuperado.
       const open = await prisma.anomaly.findMany({
-        where: { meterId, status: "OPEN" },
+        where: { meterId, status: "OPEN", llmGenerated: true },
         select: {
           type: true,
           severity: true,
@@ -193,18 +200,47 @@ export function createAnalysisRepository(prisma: PrismaClient): AnalysisReposito
 
     async persistFindings(runId, findings, summary, llmUsed) {
       await prisma.$transaction(async (tx) => {
+        // F10: UNA consulta pre-fetcha las anomalías ACTIVE (no RESOLVED) de
+        // todos los medidores afectados. Sirve para (a) decidir create/update
+        // en JS (sin findFirst por hallazgo) y (b) recalcular Meter.status con
+        // TODAS las severidades activas del medidor, no solo la de este run (F1).
+        const meterIds = [...new Set(findings.map((finding) => finding.meterId))];
+        const activeRowsByMeter = new Map<string, ActiveAnomalyRow[]>();
+        if (meterIds.length > 0) {
+          const active = await tx.anomaly.findMany({
+            where: { meterId: { in: meterIds }, status: { not: "RESOLVED" } },
+            select: { id: true, meterId: true, type: true, severity: true, status: true },
+          });
+          for (const row of active) {
+            const bucket = activeRowsByMeter.get(row.meterId) ?? [];
+            bucket.push(row);
+            activeRowsByMeter.set(row.meterId, bucket);
+          }
+        }
+
+        let newCount = 0;
+        let refreshedCount = 0;
+        // Severidades activas por medidor, en JS: arrancan con las pre-existentes
+        // y cada create/update ajusta el set antes del recompute final (F1).
+        const activeSeverities = new Map<string, string[]>();
+        for (const [meterId, rows] of activeRowsByMeter) {
+          activeSeverities.set(meterId, rows.map((row) => row.severity));
+        }
+
         for (const finding of findings) {
-          // Upsert (decisión de producto): si el medidor ya tiene una anomalía
-          // OPEN del mismo tipo, se REFRESCA en lugar de crear otra fila — N runs
-          // sobre los mismos hallazgos no acumulan N×4 anomalías. El status OPEN
-          // filtra solo: una anomalía RESOLVED queda como historial y el próximo
-          // run crea una fila nueva para ese medidor.
-          const open = await findOpenByMeterAndType(tx, finding.meterId, finding.type);
+          const rows = activeRowsByMeter.get(finding.meterId) ?? [];
+          const open = rows.find(
+            (row) => row.status === "OPEN" && row.type === finding.type,
+          ) ?? null;
+          const severities = activeSeverities.get(finding.meterId) ?? [];
+
           if (open) {
+            // F4: el run que CREÓ la anomalía conserva analysisRunId — los
+            // re-runs refrescan el contenido sin re-parentar (auditabilidad
+            // estable: cada run reporta las que creó).
             await tx.anomaly.update({
               where: { id: open.id },
               data: {
-                analysisRunId: runId,
                 relatedEventId: finding.relatedEventId,
                 type: finding.type as never,
                 severity: finding.severity as never,
@@ -218,8 +254,14 @@ export function createAnalysisRepository(prisma: PrismaClient): AnalysisReposito
                 detectionType: finding.detectionType,
                 signals: finding.signals,
                 detectedAt: new Date(),
+                llmGenerated: finding.llmGenerated,
               },
             });
+            refreshedCount++;
+            // La fila refrescada cambia de severidad: se reemplaza la previa.
+            const replaced = severities.indexOf(open.severity);
+            if (replaced !== -1) severities.splice(replaced, 1);
+            severities.push(finding.severity);
           } else {
             await tx.anomaly.create({
               data: {
@@ -238,21 +280,40 @@ export function createAnalysisRepository(prisma: PrismaClient): AnalysisReposito
                 rangeEnd: finding.rangeEnd,
                 detectionType: finding.detectionType,
                 signals: finding.signals,
+                llmGenerated: finding.llmGenerated,
               },
             });
+            newCount++;
+            severities.push(finding.severity);
+            // La fila creada entra al set activo (evita duplicados si el mismo
+            // run produjera dos findings del mismo tipo para el medidor).
+            rows.push({
+              id: "",
+              type: finding.type,
+              severity: finding.severity,
+              status: "OPEN",
+            });
           }
-          // D4: el status del medidor refleja la anomalía OPEN más severa de este run.
-          const meterStatus = deriveMeterStatus([finding.severity]);
+          activeSeverities.set(finding.meterId, severities);
+        }
+
+        // F1: Meter.status = derivación sobre TODAS las anomalías activas del
+        // medidor (misma regla que el PATCH de anomalies) — un HIGH previo
+        // mantiene CRITICAL aunque el run actual solo produzca MEDIUM.
+        for (const [meterId, severities] of activeSeverities) {
           await tx.meter.update({
-            where: { id: finding.meterId },
-            data: { status: meterStatus },
+            where: { id: meterId },
+            data: { status: deriveMeterStatus(severities) },
           });
         }
+
+        // F4: el resumen distingue nuevas vs refrescadas dentro del run.
+        const summaryWithCounts = `${summary} (${newCount} new, ${refreshedCount} refreshed)`;
         await tx.analysisRun.update({
           where: { id: runId },
           data: {
             status: "COMPLETED",
-            summary,
+            summary: summaryWithCounts,
             completedAt: new Date(),
             lockToken: null,
             llmUsed,

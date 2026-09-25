@@ -109,6 +109,10 @@ model Anomaly {
   reasonSimple            String?
   recommendedActionSimple String?
   status                  AnomalyStatus @default(OPEN)
+  // Origen de los textos persistidos: true si provienen del LLM, false si el
+  // fallback por reglas. El caché de explicaciones solo reutiliza filas con
+  // llmGenerated=true (los textos por reglas nunca se cachean).
+  llmGenerated            Boolean       @default(true)
   rangeStart              DateTime
   rangeEnd                DateTime
   detectionType           String

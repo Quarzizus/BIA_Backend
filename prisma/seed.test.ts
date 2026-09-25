@@ -7,7 +7,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 // otros tests. El esquema de URL replica testDbUrl() (mismo servidor de compose).
 process.env.DATABASE_URL = "postgresql://bia:bia@localhost:5432/bia_test_seed";
 
-const { seed } = await import("./seed");
+const { seed, parseNumericCsvField } = await import("./seed");
 const { createTestPrisma, provisionTestDb } = await import("../src/testing/testDb");
 
 const prisma = createTestPrisma("bia_test_seed");
@@ -51,4 +51,15 @@ test("naive CSV timestamps are normalized to UTC and values preserved", async ()
   expect(outageEvent?.eventTimestamp.toISOString()).toBe(
     "2026-09-08T00:00:00.000Z",
   );
+});
+
+test("parseNumericCsvField throws a clear error on invalid numbers (F8)", () => {
+  expect(() =>
+    parseNumericCsvField("abc", "consumption_kwh", { meterId: "M-X", timestamp: "2026-09-01 00:00" }),
+  ).toThrow("seed: invalid numeric value \"abc\" for field \"consumption_kwh\"");
+  expect(() => parseNumericCsvField("", "voltage_v", { meterId: "M-X" })).toThrow(
+    "seed: empty value for numeric field \"voltage_v\"",
+  );
+  expect(parseNumericCsvField("12.5", "consumption_kwh")).toBe(12.5);
+  expect(parseNumericCsvField("0.95", "power_factor")).toBe(0.95);
 });

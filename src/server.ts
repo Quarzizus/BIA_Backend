@@ -38,7 +38,26 @@ if (import.meta.main) {
       llm: createLlmClient(env),
     },
   });
-  app.listen(env.PORT, () => {
+  const server = app.listen(env.PORT, () => {
     logger.info("server listening", { port: env.PORT });
   });
+
+  // F11: shutdown graceful — cierra el HTTP server, desconecta Prisma y sale
+  // con 0. Si algo se cuelga, un timeout fuerza la salida (exit 1).
+  let shuttingDown = false;
+  const shutdown = (signal: string): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info("shutting down", { signal });
+    const forceExit = setTimeout(() => {
+      logger.error("forced exit: shutdown timed out");
+      process.exit(1);
+    }, 10_000);
+    forceExit.unref();
+    server.close(() => {
+      void prisma.$disconnect().finally(() => process.exit(0));
+    });
+  };
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 }

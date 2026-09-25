@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
+  actionSimpleWasTruncated,
+  actionWasTruncated,
   normalizeAction,
   normalizeActionSimple,
   normalizeReason,
   normalizeReasonSimple,
+  reasonSimpleWasTruncated,
+  reasonWasTruncated,
 } from "../domain/llm-format";
 
 describe("normalizeReason", () => {
@@ -212,5 +216,46 @@ describe("normalizeActionSimple", () => {
   test("returns an empty string for empty input", () => {
     expect(normalizeActionSimple("")).toBe("");
     expect(normalizeActionSimple("   ")).toBe("");
+  });
+});
+
+describe("truncation awareness helpers (F9)", () => {
+  test("reasonWasTruncated detects content dropped beyond the 3-paragraph cap", () => {
+    const raw = Array.from({ length: 5 }, (_, i) => `Párrafo ${i + 1}: una frase.`).join("\n\n");
+    const normalized = normalizeReason(raw);
+    expect(normalized.split("\n\n")).toHaveLength(3);
+    expect(reasonWasTruncated(raw, normalized)).toBe(true);
+  });
+
+  test("reasonWasTruncated is false when nothing was dropped", () => {
+    const raw = "Párrafo uno: primera frase.\n\nPárrafo dos: segunda.";
+    expect(reasonWasTruncated(raw, normalizeReason(raw))).toBe(false);
+  });
+
+  test("reasonWasTruncated detects a wall of text longer than the 3-group cap", () => {
+    const raw = Array.from({ length: 5 }, (_, i) => `Frase número ${i + 1}.`).join(" ");
+    expect(reasonWasTruncated(raw, normalizeReason(raw))).toBe(true);
+  });
+
+  test("reasonSimpleWasTruncated detects drops beyond the 2-paragraph cap", () => {
+    const raw = Array.from({ length: 3 }, (_, i) => `Párrafo ${i + 1}: una frase.`).join("\n\n");
+    expect(reasonSimpleWasTruncated(raw, normalizeReasonSimple(raw))).toBe(true);
+  });
+
+  test("actionWasTruncated detects items dropped beyond the 4-item cap", () => {
+    const raw = Array.from({ length: 6 }, (_, i) => `${i + 1}) Acción ${i + 1}.`).join("\n");
+    const normalized = normalizeAction(raw);
+    expect(normalized.split("\n")).toHaveLength(4);
+    expect(actionWasTruncated(raw, normalized)).toBe(true);
+  });
+
+  test("actionSimpleWasTruncated detects drops beyond the 3-item cap", () => {
+    const raw = Array.from({ length: 5 }, (_, i) => `${i + 1}) Paso ${i + 1}.`).join("\n");
+    expect(actionSimpleWasTruncated(raw, normalizeActionSimple(raw))).toBe(true);
+  });
+
+  test("empty raw input is never reported as truncated", () => {
+    expect(reasonWasTruncated("", "")).toBe(false);
+    expect(actionWasTruncated("", "")).toBe(false);
   });
 });

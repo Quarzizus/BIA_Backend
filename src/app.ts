@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import express from "express";
 import type { Express } from "express";
+import cors from "cors";
 import type { PrismaClient } from "./generated/prisma/client";
 import { apiReference } from "@scalar/express-api-reference";
 import { errorMiddleware, notFoundHandler } from "./shared/errors";
@@ -26,6 +27,9 @@ const OPENAPI_SPEC = readFileSync(OPENAPI_PATH, "utf8");
  */
 export function createApp(prisma: PrismaClient, options: AppOptions = {}): Express {
   const app = express();
+  // F11: CORS abierto para el MVP — el frontend puede llamar directo al backend
+  // (el proxy sigue siendo una opción válida).
+  app.use(cors());
   app.use(express.json());
 
   app.get("/", (_req, res) => {
