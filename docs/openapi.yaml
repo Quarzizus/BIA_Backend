@@ -370,8 +370,11 @@ paths:
       tags: [Dashboard]
       summary: Resumen del dashboard
       description: |
-        Consumo total, medidores en alerta/crítico, anomalías abiertas por
-        severidad y las anomalías abiertas más recientes.
+        Consumo total, total de lecturas, medidores en alerta/crítico, anomalías
+        abiertas por severidad y las anomalías abiertas más recientes.
+        `total_readings` (conteo global de lecturas) se compara con
+        `last_analysis.readings_count` para detectar datos nuevos tras un
+        import (scope-aware: ver `readings_count` en el status del run).
       operationId: getDashboardSummary
       responses:
         "200":
@@ -457,6 +460,12 @@ paths:
         anomalías con `new_anomalies: 0` y `refreshed_anomalies: N`. El
         resumen distingue `(X new, Y refreshed)` y `explanation_source`
         diferencia LLM llamado / textos LLM reutilizados de caché / reglas.
+        `readings_count` son las lecturas que consumió el run (total si
+        global, del medidor si per-medidor). Comparación scope-aware para
+        detectar datos nuevos tras un import: si `meter_id` es null se compara
+        el conteo global actual contra `readings_count`; si está fijado, el
+        total de lecturas de ESE medidor (`GET /meters/{id}/readings`) contra
+        `readings_count`.
       operationId: getAnalysisStatus
       parameters:
         - $ref: "#/components/parameters/AnalysisRunId"
@@ -1198,7 +1207,7 @@ components:
     LastAnalysis:
       type: object
       description: Último análisis ejecutado (KPI dashboard — fecha/hora y estado, sin datos completos)
-      required: [id, status, started_at, completed_at, anomaly_count, meter_id]
+      required: [id, status, started_at, completed_at, anomaly_count, readings_count, meter_id]
       properties:
         id:
           type: string
@@ -1214,6 +1223,9 @@ components:
         anomaly_count:
           type: integer
           description: Anomalías detectadas en ese run (nuevas + refrescadas)
+        readings_count:
+          type: integer
+          description: Lecturas consumidas por el run — total si global, del medidor si per-medidor
         meter_id:
           type: [string, "null"]
           description: Alcance del run — código del medidor si fue por medidor (?meter_id=), null si global
@@ -1234,6 +1246,7 @@ components:
       type: object
       required:
         - total_consumption
+        - total_readings
         - meters_alert
         - meters_critical
         - open_by_severity
@@ -1244,6 +1257,9 @@ components:
         total_consumption:
           type: number
           description: Suma del consumo de todas las lecturas (kWh)
+        total_readings:
+          type: integer
+          description: Total de lecturas en la base (conteo global) — comparar contra readings_count del run para detectar datos nuevos tras un import
         meters_alert:
           type: integer
           description: Medidores en estado ALERT
@@ -1278,6 +1294,7 @@ components:
         - new_anomalies
         - refreshed_anomalies
         - explanation_source
+        - readings_count
         - meter_id
         - llm_used
         - started_at
@@ -1308,6 +1325,16 @@ components:
             RUNNING/FAILED o si no hubo hallazgos. `llm` = LLM llamado en este
             run; `llm_cached` = textos LLM reutilizados sin llamada; `rules` =
             explicaciones generadas por reglas (proveedor caído).
+        readings_count:
+          type: integer
+          description: |
+            Lecturas consumidas por el run — total si global (meter_id null),
+            del medidor si per-medidor. Comparación scope-aware con el conteo
+            actual para detectar datos nuevos tras un import: global → comparar
+            contra `total_readings` del dashboard; per-medidor → contra el
+            total de `GET /meters/{meterId}/readings` de ESE medidor. Funciona
+            porque los imports solo AGREGAN lecturas (skipDuplicates, nunca
+            reemplazan).
         meter_id:
           type: [string, "null"]
           description: Alcance del run — código del medidor si fue un análisis por medidor (?meter_id=), null si fue global (todos los medidores)
