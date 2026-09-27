@@ -4,6 +4,7 @@ import { PrismaClient } from "../src/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import type { EventType } from "../src/generated/prisma/enums";
 import { createAuth } from "../src/config/auth";
+import { normalizeTimestampToUtc, parseCsv } from "../src/shared/csv";
 
 const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) {
@@ -42,18 +43,6 @@ const EVENT_TYPES: readonly string[] = [
 ];
 
 /**
- * Normaliza un timestamp CSV naive ("2026-09-01 00:00:00" o "2026-09-11 00:00")
- * a un Date UTC reemplazando el espacio por "T", completando segundos y
- * añadiendo "Z". Determinista: la misma fila produce siempre el mismo instante.
- */
-export function normalizeTimestampToUtc(raw: string): Date {
-  const withT = raw.trim().replace(" ", "T");
-  const hasSeconds = /T\d{2}:\d{2}:\d{2}$/.test(withT);
-  const normalized = hasSeconds ? withT : `${withT}:00`;
-  return new Date(`${normalized}Z`);
-}
-
-/**
  * F8: convierte un campo numérico del CSV a number con validación explícita.
  * Un valor que no parsea (NaN) rompe el seed con un error claro en vez de
  * persistir silenciosamente un número corrupto en la base.
@@ -74,41 +63,6 @@ export function parseNumericCsvField(
     throw new Error(`seed: invalid numeric value "${raw}" for field "${field}"${where}`);
   }
   return parsed;
-}
-
-export function splitCsvLine(line: string): string[] {
-  const values: string[] = [];
-  let current = "";
-  let inQuotes = false;
-  for (const char of line) {
-    if (char === '"') {
-      inQuotes = !inQuotes;
-    } else if (char === "," && !inQuotes) {
-      values.push(current);
-      current = "";
-    } else {
-      current += char;
-    }
-  }
-  values.push(current);
-  return values;
-}
-
-export function parseCsv<T>(text: string): T[] {
-  const lines = text.trim().split(/\r?\n/);
-  const header = lines[0];
-  if (!header) {
-    throw new Error("seed: CSV is empty");
-  }
-  const columns = splitCsvLine(header).map((column) => column.trim());
-  return lines.slice(1).map((line) => {
-    const values = splitCsvLine(line);
-    const record: Record<string, string> = {};
-    columns.forEach((column, index) => {
-      record[column] = values[index] ?? "";
-    });
-    return record as T;
-  });
 }
 
 function readSeedCsv<T>(fileName: string): T[] {

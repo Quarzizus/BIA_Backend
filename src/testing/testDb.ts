@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PrismaClient } from "../generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { parseCsv, normalizeTimestampToUtc } from "../../prisma/seed";
+import { parseCsv, normalizeTimestampToUtc } from "../shared/csv";
 
 /**
  * Bases de datos aisladas por archivo de test de integración.

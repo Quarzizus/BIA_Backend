@@ -49,6 +49,13 @@ enum AnalysisStatus {
   FAILED
 }
 
+enum ImportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 model Meter {
   id        String      @id @default(cuid())
   meterId   String      @unique
@@ -148,6 +155,22 @@ model AnalysisRun {
   anomalies   Anomaly[]
 
   @@map("analysis_runs")
+}
+
+model ImportRun {
+  id                String       @id @default(cuid())
+  status            ImportStatus
+  fileName          String?
+  totalRows         Int          @default(0)
+  imported          Int          @default(0)
+  skippedDuplicates Int          @default(0)
+  failedRows        Int          @default(0)
+  // Errores por fila del CSV (Json array) o el error fatal de un run FAILED.
+  errors            Json?
+  startedAt         DateTime     @default(now())
+  completedAt       DateTime?
+
+  @@map("import_runs")
 }
 
 // ==== Autenticación (better-auth, adaptador Prisma) ====

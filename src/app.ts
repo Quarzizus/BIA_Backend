@@ -14,6 +14,7 @@ import { createReadingsRouter } from "./modules/readings/reading.routes";
 import { createAnomaliesRouter } from "./modules/anomalies/anomaly.routes";
 import { createDashboardRouter } from "./modules/dashboard/dashboard.routes";
 import { createAnalysisRouter, type AnalysisRouterDeps } from "./modules/analysis";
+import { createImportsRouter } from "./modules/imports";
 
 export interface AppOptions {
   analysis?: AnalysisRouterDeps;
@@ -62,6 +63,7 @@ export function createApp(prisma: PrismaClient, options: AppOptions = {}): Expre
   app.use("/meters", requireAuth, createReadingsRouter(prisma));
   app.use("/anomalies", requireAuth, createAnomaliesRouter(prisma));
   app.use("/dashboard", requireAuth, createDashboardRouter(prisma));
+  app.use("/readings", requireAuth, createImportsRouter(prisma));
 
   if (options.analysis) {
     app.use("/ai", requireAuth, createAnalysisRouter(prisma, options.analysis));

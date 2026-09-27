@@ -50,6 +50,16 @@ describe("authentication (Option A)", () => {
     expect(((await res.json()) as unknown[]).length).toBe(12);
   });
 
+  test("POST /readings/import without a cookie → 401 UNAUTHORIZED (imports are protected)", async () => {
+    const res = await fetch(`${baseUrl}/readings/import`, {
+      method: "POST",
+      body: new FormData(),
+    });
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("UNAUTHORIZED");
+  });
+
   test("GET /api/auth/get-session returns the authenticated user", async () => {
     const cookie = await signInAndGetCookie(baseUrl);
     const res = await fetch(`${baseUrl}/api/auth/get-session`, { headers: { cookie } });

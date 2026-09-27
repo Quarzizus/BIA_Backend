@@ -9,15 +9,19 @@ info:
     El análisis es asíncrono: `POST /ai/analyze` crea un run y responde 202;
     el progreso se consulta con `GET /ai/analysis/{id}`.
 
+    La importación de lecturas por CSV también es asíncrona:
+    `POST /readings/import` acepta un archivo multipart y responde 202; el
+    resumen se consulta con `GET /readings/imports/{import_id}`.
+
     Todas las fechas son ISO 8601 en UTC. Los errores usan un envelope uniforme:
     `{"error": {"code": "...", "message": "..."}}`.
 
     **Autenticación**: las rutas de negocio (`/meters`, `/anomalies`,
-    `/dashboard`, `/ai/*`) requieren una sesión por cookie httpOnly emitida por
-    better-auth (sin Bearer: el cliente envía la cookie automáticamente).
-    Son públicas `/`, `/docs`, `/openapi.yaml` y `/api/auth/*`. Sin sesión
-    válida la API responde `401 UNAUTHORIZED`. Credenciales de la demo:
-    `admin@example.com` / `Admin123!` (ver README).
+    `/dashboard`, `/ai/*`, `/readings`) requieren una sesión por cookie httpOnly
+    emitida por better-auth (sin Bearer: el cliente envía la cookie
+    automáticamente). Son públicas `/`, `/docs`, `/openapi.yaml` y `/api/auth/*`.
+    Sin sesión válida la API responde `401 UNAUTHORIZED`. Credenciales de la
+    demo: `admin@example.com` / `Admin123!` (ver README).
 servers:
   - url: http://localhost:3000
     description: Entorno local (docker compose)
@@ -35,6 +39,8 @@ tags:
     description: Resumen para el panel de control
   - name: Análisis
     description: Pipeline de análisis asíncrono con IA
+  - name: Importación
+    description: Importación asíncrona de lecturas por CSV
 
 paths:
   /api/auth/sign-in/email:
@@ -470,6 +476,118 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /readings/import:
+    post:
+      tags: [Importación]
+      summary: Importa lecturas desde un archivo CSV (asíncrono)
+      description: |
+        Sube un CSV de lecturas (campo multipart `file`, máximo 5 MB y 20.000
+        filas de datos). Responde 202 con `{import_id, status}` y procesa en
+        segundo plano; el progreso se consulta con `GET /readings/imports/{id}`.
+
+        **Header exacto (primera fila)**: `meter_id,timestamp,consumption_kwh,voltage_v,current_a,power_factor,status`
+
+        **Reglas por columna**:
+        - `meter_id` — obligatorio; debe existir (código público p. ej. `M-101`); si no, la fila falla con `meter_not_found`.
+        - `timestamp` — obligatorio ISO 8601; si no, la fila falla con `invalid_timestamp`. Formatos naive (`2026-09-01 00:00:00`) se interpretan como UTC.
+        - `consumption_kwh` — obligatorio, número ≥ 0; vacío → `missing_consumption`, no numérico/negativo → `invalid_number`.
+        - `voltage_v` / `current_a` — opcionales, numéricos (vacío → 0); no numéricos → `invalid_number`.
+        - `power_factor` — opcional, numérico en [0, 1]; fuera de rango → `invalid_power_factor`.
+        - `status` — opcional, default `OK`.
+        - Decimales con punto. Se tolera BOM UTF-8 (Excel/Windows). Líneas en blanco se ignoran.
+
+        **Duplicados**: mismo `meter_id` + `timestamp` — dentro del archivo gana
+        la primera fila; contra la base se omiten con `skipDuplicates`. Ambos
+        casos cuentan como `skipped_duplicates`.
+
+        La importación NO dispara análisis y no persiste baseline ni
+        `latest_reading_at`: ambos se derivan al leer (se actualizan solos).
+
+        Las filas inválidas NO bloquean el lote: se registran en `errors` del
+        resumen y se persisten las válidas.
+      operationId: importReadings
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Archivo CSV con el header exacto descrito arriba (≤ 5 MB)
+      responses:
+        "202":
+          description: Importación aceptada (procesamiento asíncrono)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportAccepted"
+        "400":
+          description: |
+            Sin archivo en el campo `file` (`NO_FILE`) o header del CSV
+            incorrecto (`INVALID_HEADER`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                noFile:
+                  value:
+                    error:
+                      code: NO_FILE
+                      message: "Multipart field 'file' (CSV) is required"
+                invalidHeader:
+                  value:
+                    error:
+                      code: INVALID_HEADER
+                      message: "CSV header must be exactly: meter_id,timestamp,consumption_kwh,voltage_v,current_a,power_factor,status"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          description: |
+            Archivo mayor a 5 MB o más de 20.000 filas de datos
+            (`IMPORT_LIMIT_EXCEEDED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  code: IMPORT_LIMIT_EXCEEDED
+                  message: File exceeds the 5 MB limit
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /readings/imports/{import_id}:
+    get:
+      tags: [Importación]
+      summary: Estado y resumen de una importación
+      description: |
+        Estado del run (`PENDING`, `PROCESSING`, `COMPLETED` o `FAILED`) con el
+        resumen (`total_rows`, `imported`, `skipped_duplicates`, `failed_rows`)
+        y los errores por fila. Endpoint de polling tras `POST /readings/import`.
+      operationId: getImportStatus
+      parameters:
+        - $ref: "#/components/parameters/ImportRunId"
+      responses:
+        "200":
+          description: Estado de la importación
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportRunStatus"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
 components:
   parameters:
     MeterId:
@@ -491,6 +609,13 @@ components:
       in: path
       required: true
       description: ID del run de análisis (cuid)
+      schema:
+        type: string
+    ImportRunId:
+      name: import_id
+      in: path
+      required: true
+      description: ID del run de importación (cuid)
       schema:
         type: string
     ReadingsFrom:
@@ -651,7 +776,8 @@ components:
               description: |
                 Código del error: `UNAUTHORIZED` (sesión requerida),
                 `VALIDATION_ERROR`, `NOT_FOUND`, `ANALYSIS_IN_PROGRESS`,
-                `INVALID_STATUS_TRANSITION`, `AI_NOT_CONFIGURED` o
+                `INVALID_STATUS_TRANSITION`, `AI_NOT_CONFIGURED`,
+                `NO_FILE`, `INVALID_HEADER`, `IMPORT_LIMIT_EXCEEDED` o
                 `INTERNAL_ERROR`.
             message:
               type: string
@@ -1203,3 +1329,76 @@ components:
         analysis_id:
           type: string
           description: ID del run creado; consultar con `GET /ai/analysis/{id}`
+
+    ImportStatus:
+      type: string
+      enum: [PENDING, PROCESSING, COMPLETED, FAILED]
+
+    ImportAccepted:
+      type: object
+      description: Respuesta de creación de la importación (procesamiento asíncrono)
+      required: [import_id, status]
+      properties:
+        import_id:
+          type: string
+          description: ID del run de importación; consultar con `GET /readings/imports/{import_id}`
+        status:
+          $ref: "#/components/schemas/ImportStatus"
+
+    ImportSummary:
+      type: object
+      description: Resumen agregado de la importación
+      required: [total_rows, imported, skipped_duplicates, failed_rows]
+      properties:
+        total_rows:
+          type: integer
+          description: Filas de datos del CSV (sin header ni líneas en blanco)
+        imported:
+          type: integer
+          description: Lecturas insertadas en la base
+        skipped_duplicates:
+          type: integer
+          description: Filas omitidas por duplicado (mismo `meter_id` + `timestamp`), dentro del archivo o contra la base
+        failed_rows:
+          type: integer
+          description: Filas inválidas (detalle en `errors`)
+
+    ImportRowError:
+      type: object
+      description: Error de una fila del CSV (no bloquea el resto del lote)
+      required: [row, meter_id, error]
+      properties:
+        row:
+          type: integer
+          description: Número de línea del CSV (1 = header, 2 = primera fila de datos)
+        meter_id:
+          type: string
+          description: Código público del medidor de la fila (vacío si no se pudo leer)
+        error:
+          type: string
+          enum: [meter_not_found, invalid_timestamp, missing_consumption, invalid_number, invalid_power_factor]
+          description: Código del error de la fila
+
+    ImportRunStatus:
+      type: object
+      description: Estado completo de una importación (contrato de polling)
+      required: [id, status, started_at, completed_at, summary, errors]
+      properties:
+        id:
+          type: string
+          description: ID del run de importación (cuid)
+        status:
+          $ref: "#/components/schemas/ImportStatus"
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: [string, "null"]
+          format: date-time
+        summary:
+          $ref: "#/components/schemas/ImportSummary"
+        errors:
+          type: array
+          description: Errores por fila; en un run `FAILED` contiene el error fatal (row 0)
+          items:
+            $ref: "#/components/schemas/ImportRowError"
