@@ -13,6 +13,11 @@ export function createDashboardRepository(prisma: PrismaClient): DashboardReposi
       return agg._sum.consumptionKwh ?? null;
     },
 
+    /** Total de lecturas en la base — el frontend lo compara con readings_count del run. */
+    async totalReadings(): Promise<number> {
+      return prisma.reading.count();
+    },
+
     async meterStatusCounts() {
       const rows = await prisma.meter.groupBy({ by: ["status"], _count: { _all: true } });
       return rows.map((row) => ({ status: row.status, count: row._count._all }));

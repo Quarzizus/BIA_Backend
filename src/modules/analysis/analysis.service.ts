@@ -82,6 +82,8 @@ export interface AnalysisRunStatus {
   refreshed_anomalies: number;
   /** Origen de las explicaciones (null mientras RUNNING/FAILED o sin hallazgos). */
   explanation_source: ExplanationSource | null;
+  /** Lecturas que consumió el run — total si global, del medidor si per-medidor. */
+  readings_count: number;
   /** Alcance del run: código del medidor si fue por medidor (?meter_id=), null si global. */
   meter_id: string | null;
   /** Backward compat: true si el LLM fue llamado en este run (caché → false). */
@@ -398,7 +400,15 @@ export function createAnalysisService(
     if (failedMeters > 0) {
       summary += `; ${failedMeters} meter${failedMeters === 1 ? "" : "s"} failed`;
     }
-    await repository.persistFindings(runId, findings, summary, llmUsed, explanationSource);
+    // Lecturas consumidas por el run: suma de las lecturas de los medidores
+    // PROCESADOS (selectedMeters). Escope-aware: por medidor = solo ese
+    // medidor; global = todos. El frontend lo compara con el conteo actual
+    // para detectar datos nuevos tras un import (add-only con skipDuplicates).
+    const readingsCount = selectedMeters.reduce(
+      (acc, meter) => acc + (readingsByMeter.get(meter.id)?.length ?? 0),
+      0,
+    );
+    await repository.persistFindings(runId, findings, summary, llmUsed, explanationSource, readingsCount);
   }
 
   return {
@@ -457,6 +467,7 @@ export function createAnalysisService(
         new_anomalies: run.newCount,
         refreshed_anomalies: run.refreshedCount,
         explanation_source: run.explanationSource as ExplanationSource | null,
+        readings_count: run.readingsCount,
         meter_id: run.meterId ?? null,
         llm_used: run.llmUsed,
         started_at: run.startedAt.toISOString(),

@@ -79,6 +79,9 @@ export interface AnalysisRepository {
    * Persiste hallazgos + status de medidor recalculado + finalización del run,
    * atómicamente. `explanationSource` es el origen de los textos del run
    * ("llm" | "llm_cached" | "rules" | null) decidido por el servicio.
+   * `readingsCount` es el total de lecturas que consumió el run (total si
+   * global, del medidor si per-medidor) — el frontend lo compara con el conteo
+   * actual para detectar datos nuevos tras un import.
    */
   persistFindings(
     runId: string,
@@ -86,6 +89,7 @@ export interface AnalysisRepository {
     summary: string,
     llmUsed: boolean,
     explanationSource: "llm" | "llm_cached" | "rules" | null,
+    readingsCount: number,
   ): Promise<void>;
   failRun(runId: string, message: string): Promise<void>;
 }
@@ -213,7 +217,7 @@ export function createAnalysisRepository(prisma: PrismaClient): AnalysisReposito
       };
     },
 
-    async persistFindings(runId, findings, summary, llmUsed, explanationSource) {
+    async persistFindings(runId, findings, summary, llmUsed, explanationSource, readingsCount) {
       await prisma.$transaction(async (tx) => {
         // F10: UNA consulta pre-fetcha las anomalías ACTIVE (no RESOLVED) de
         // todos los medidores afectados. Sirve para (a) decidir create/update
@@ -335,6 +339,9 @@ export function createAnalysisRepository(prisma: PrismaClient): AnalysisReposito
             // Contadores del contrato de status: nuevas y refrescadas del run.
             newCount,
             refreshedCount,
+            // Lecturas consumidas por el run (contrato readings_count): total
+            // si global, del medidor si per-medidor. 0 en runs fallidos.
+            readingsCount,
             // Origen de las explicaciones (null si el run no tuvo hallazgos).
             explanationSource,
           },

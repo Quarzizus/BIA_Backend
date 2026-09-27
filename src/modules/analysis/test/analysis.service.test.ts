@@ -434,6 +434,12 @@ describe("runAnalysis pipeline", () => {
     expect(status.explanation_source).toBe("llm");
     expect(status.llm_used).toBe(true);
     expect(typeof status.summary).toBe("string");
+    // Run global sobre el fixture: readings_count = suma de las lecturas de
+    // TODOS los medidores procesados (los 4 del fixture).
+    const fixtureReadings = await prisma.reading.count({
+      where: { meter: { meterId: { in: FIXTURE_METERS } } },
+    });
+    expect(status.readings_count).toBe(fixtureReadings);
   });
 
   test("getStatus exposes a null explanation source and zero counts while RUNNING", async () => {
@@ -447,6 +453,8 @@ describe("runAnalysis pipeline", () => {
     expect(status.new_anomalies).toBe(0);
     expect(status.refreshed_anomalies).toBe(0);
     expect(status.explanation_source).toBeNull();
+    // Sin pipeline ejecutado aún → readings_count en su default (0).
+    expect(status.readings_count).toBe(0);
     expect(status.completed_at).toBeNull();
     // El run queda RUNNING con lockToken='single': se elimina de inmediato para
     // NO bloquear la garantía de run único (P2002) de los demás tests.
@@ -984,6 +992,13 @@ describe("start({ meterCodes }) — análisis por medidor", () => {
     expect(status.refreshed_anomalies).toBe(0);
     expect(status.summary).toContain("1 meter(s)");
     expect(status.meter_id).toBe("M-PZ1");
+    // Run POR MEDIDOR: readings_count = solo las lecturas de M-PZ1 (fixture
+    // base 14 días × 24 h = 336; el conteo se toma de la base por robustez
+    // frente al orden de los tests).
+    const mPz1Readings = await prisma.reading.count({
+      where: { meter: { meterId: "M-PZ1" } },
+    });
+    expect(status.readings_count).toBe(mPz1Readings);
 
     const rows = await prisma.anomaly.findMany({
       where: { analysisRunId: id },

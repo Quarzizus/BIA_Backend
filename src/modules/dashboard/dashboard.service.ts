@@ -12,8 +12,9 @@ export function createDashboardService(prisma: PrismaClient): DashboardService {
 
   return {
     async summary(): Promise<DashboardSummary> {
-      const [total, meterStatuses, openBySeverityRows, severityRows, recent, lastRun] = await Promise.all([
+      const [total, totalReadings, meterStatuses, openBySeverityRows, severityRows, recent, lastRun] = await Promise.all([
         repository.totalConsumption(),
+        repository.totalReadings(),
         repository.meterStatusCounts(),
         repository.openBySeverityCounts(),
         repository.severityCounts(),
@@ -33,6 +34,7 @@ export function createDashboardService(prisma: PrismaClient): DashboardService {
 
       return {
         total_consumption: total ?? 0,
+        total_readings: totalReadings,
         meters_alert: countByStatus.get("ALERT") ?? 0,
         meters_critical: countByStatus.get("CRITICAL") ?? 0,
         open_by_severity: openBySeverity,
@@ -52,6 +54,7 @@ export function createDashboardService(prisma: PrismaClient): DashboardService {
               started_at: lastRun.startedAt.toISOString(),
               completed_at: lastRun.completedAt?.toISOString() ?? null,
               anomaly_count: lastRun.newCount + lastRun.refreshedCount,
+              readings_count: lastRun.readingsCount,
               meter_id: lastRun.meterId ?? null,
             }
           : null,

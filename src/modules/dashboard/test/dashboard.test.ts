@@ -102,6 +102,14 @@ describe("GET /dashboard/summary", () => {
     expect(body.total_consumption).toBeCloseTo(agg._sum.consumptionKwh!, 2);
   });
 
+  test("total_readings equals the total number of readings in the database", async () => {
+    const count = await prisma.reading.count();
+    const body = (await (await fetch(`${server.baseUrl}/dashboard/summary`)).json()) as Record<string, any>;
+    // Conteo global server-exacto: el frontend lo compara con readings_count
+    // del run para detectar datos nuevos tras un import.
+    expect(body.total_readings).toBe(count);
+  });
+
   test("counts meters by stored ALERT/CRITICAL status", async () => {
     const body = (await (await fetch(`${server.baseUrl}/dashboard/summary`)).json()) as Record<string, any>;
     expect(body.meters_alert).toBe(1);
@@ -133,6 +141,9 @@ describe("GET /dashboard/summary", () => {
     expect(body.last_analysis.started_at).toBeDefined();
     expect(body.last_analysis).toHaveProperty("completed_at");
     expect(body.last_analysis).toHaveProperty("anomaly_count");
+    // El run del fixture se creó sin pipeline → readings_count en su default (0).
+    expect(body.last_analysis).toHaveProperty("readings_count");
+    expect(body.last_analysis.readings_count).toBe(0);
     // El run del fixture es global (sin scope) → meter_id null.
     expect(body.last_analysis.meter_id).toBeNull();
   });

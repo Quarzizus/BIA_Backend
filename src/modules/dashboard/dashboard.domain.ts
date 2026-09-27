@@ -19,12 +19,16 @@ export interface LastAnalysisDto {
   started_at: string;
   completed_at: string | null;
   anomaly_count: number;
+  /** Lecturas que consumió el run — total si global, del medidor si per-medidor. */
+  readings_count: number;
   /** Alcance del run: código del medidor si fue por medidor (?meter_id=), null si global. */
   meter_id: string | null;
 }
 
 export interface DashboardSummary {
   total_consumption: number;
+  /** Total de lecturas en la base (para comparar contra readings_count del run). */
+  total_readings: number;
   meters_alert: number;
   meters_critical: number;
   open_by_severity: { HIGH: number; MEDIUM: number; LOW: number };
@@ -51,6 +55,8 @@ export interface DashboardService {
 
 export interface DashboardRepository {
   totalConsumption(): Promise<number | null>;
+  /** Total de lecturas en la base (conteo global de `reading`). */
+  totalReadings(): Promise<number>;
   meterStatusCounts(): Promise<Array<{ status: MeterStatus; count: number }>>;
   openBySeverityCounts(): Promise<Array<{ severity: Severity; count: number }>>;
   severityCounts(): Promise<Array<{ severity: Severity; count: number }>>;

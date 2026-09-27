@@ -142,6 +142,10 @@ model AnalysisRun {
   // newCount + refreshedCount (detectadas en este run, no solo creadas).
   newCount          Int      @default(0)
   refreshedCount    Int      @default(0)
+  // Cuántas lecturas consumió el run — total si global, del medidor si
+  // per-medidor. El frontend lo compara con el conteo actual para detectar
+  // datos nuevos tras un import (los imports son add-only con skipDuplicates).
+  readingsCount     Int      @default(0)
   // Origen de las explicaciones del run: "llm" (LLM llamado este run),
   // "llm_cached" (textos LLM reutilizados sin llamada), "rules" (fallback por
   // reglas) o null (run RUNNING/FAILED o sin hallazgos).
