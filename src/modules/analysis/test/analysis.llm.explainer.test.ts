@@ -47,7 +47,7 @@ describe("buildExplainPrompt", () => {
     expect(messages[1]!.content).toContain("markdown");
   });
 
-  test("instructs the simple versions (cotidiano, sin jerga, 1-2 frases y 2-3 pasos)", () => {
+  test("instructs the simple versions (cotidiano, sin jerga, idea principal y 2-3 pasos)", () => {
     const messages = buildExplainPrompt(anomaly);
     // Sistema: contrato dual para reason_simple/recommended_action_simple.
     expect(messages[0]!.content).toContain("reason_simple");
@@ -55,7 +55,8 @@ describe("buildExplainPrompt", () => {
     expect(messages[0]!.content).toContain("analogía");
     // Prompt del usuario: reglas de formato simple.
     expect(messages[1]!.content).toContain("reason_simple");
-    expect(messages[1]!.content).toContain("lenguaje cotidiano SIN jerga técnica");
+    expect(messages[1]!.content).toContain('"Idea principal: "');
+    expect(messages[1]!.content).toContain("UNA frase corta");
     expect(messages[1]!.content).toContain("cualquier persona pueda seguir");
   });
 

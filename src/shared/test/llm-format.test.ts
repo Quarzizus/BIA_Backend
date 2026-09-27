@@ -164,7 +164,7 @@ describe("normalizeReasonSimple", () => {
 
   test("keeps already-formatted text stable (idempotent)", () => {
     const formatted =
-      "El consumo subió de forma notoria desde hace unos días.\n\nAlgo se conectó o se dañó en la instalación.";
+      "Idea principal: El consumo subió de forma notoria desde hace unos días.\n\nAlgo se conectó o se dañó en la instalación.";
     expect(normalizeReasonSimple(formatted)).toBe(formatted);
     expect(normalizeReasonSimple(normalizeReasonSimple(formatted))).toBe(
       normalizeReasonSimple(formatted),
@@ -173,7 +173,7 @@ describe("normalizeReasonSimple", () => {
 
   test("keeps the fallback simple string stable through the normalizer", () => {
     const fallback =
-      "El consumo cambió un 112.3% respecto a lo normal.\n\nEl sistema no pudo consultar al asistente automático, así que esta explicación se generó automáticamente.";
+      "Idea principal: El consumo cambió un 112.3% respecto a lo normal.\n\nEl sistema no pudo consultar al asistente automático, así que esta explicación se generó automáticamente.";
     expect(normalizeReasonSimple(fallback)).toBe(fallback);
     expect(normalizeReasonSimple(normalizeReasonSimple(fallback))).toBe(
       normalizeReasonSimple(fallback),

@@ -181,7 +181,7 @@ export function FALLBACK_REASON_SIMPLE(
     variationPct !== null
       ? `El consumo cambió un ${variationPct}% respecto a lo normal.`
       : "El consumo cambió de forma notable respecto a lo normal.";
-  return `${variation}\n\nEl sistema no pudo consultar al asistente automático, así que esta explicación se generó automáticamente.`;
+  return `Idea principal: ${variation}\n\nEl sistema no pudo consultar al asistente automático, así que esta explicación se generó automáticamente.`;
 }
 
 /** Acción SIMPLE por reglas (fallback del LLM): 2-3 pasos cotidianos con prefijo "- ". */

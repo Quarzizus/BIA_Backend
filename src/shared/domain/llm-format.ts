@@ -105,24 +105,35 @@ export function normalizeReason(raw: string): string {
 }
 
 /**
- * Normaliza `reason_simple` al contrato canónico: 1-2 párrafos de 1-2 frases
- * separados por línea en blanco ("\n\n"), en lenguaje cotidiano.
+ * Normaliza `reason_simple` al contrato canónico: SIEMPRE empieza con
+ * "Idea principal: <frase corta, máx 2 líneas>" seguida de una línea en blanco
+ * y el resto de la explicación en lenguaje cotidiano (1 párrafo de 1-2 frases).
  *
- * Misma lógica que `normalizeReason` pero con límites más cortos (2 párrafos,
- * 2 frases por párrafo): los textos simples deben ser breves y legibles.
+ * - Si el texto ya trae el prefijo "Idea principal:" (case-insensitive), la
+ *   idea es la 1ª-2ª frase tras el prefijo y el resto es el cuerpo.
+ * - Si no lo trae, la PRIMERA frase se convierte en la idea principal y las
+ *   siguientes en el cuerpo — la garantía no depende del humor del modelo.
  */
 export function normalizeReasonSimple(raw: string): string {
   const text = raw.trim();
   if (text === "") return "";
 
-  if (text.includes("\n\n")) {
-    return splitIntoParagraphs(text, MAX_REASON_SIMPLE_PARAGRAPHS);
-  }
-  return groupSentencesIntoParagraphs(
-    text,
-    MAX_REASON_SIMPLE_PARAGRAPHS,
+  const hasPrefix = /^idea principal\s*:/i.test(text);
+  const content = hasPrefix ? text.replace(/^idea principal\s*:/i, "").trim() : text;
+  const sentences = splitSentences(content);
+
+  if (sentences.length === 0) return "Idea principal: ";
+  // La idea principal es UNA frase corta (máx 2 líneas en pantalla); el resto
+  // del texto es el cuerpo. Cortar en 2 frases rompería la idempotencia cuando
+  // el cuerpo ya está separado por "\n\n".
+  const mainIdea = sentences[0]!;
+  const body = groupSentencesIntoParagraphs(
+    sentences.slice(1).join(" "),
+    1,
     MAX_SENTENCES_PER_SIMPLE_PARAGRAPH,
   );
+
+  return body ? `Idea principal: ${mainIdea}\n\n${body}` : `Idea principal: ${mainIdea}`;
 }
 
 /**
