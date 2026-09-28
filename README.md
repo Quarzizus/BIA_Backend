@@ -10,41 +10,23 @@ Este repositorio contiene el **backend** (API REST + pipeline de análisis). Sta
 
 ## Camino rápido
 
-```bash
-cp .env.example .env        # edita DATABASE_URL, BETTER_AUTH_SECRET, AI_*...
-openssl rand -base64 32     # genera un BETTER_AUTH_SECRET (≥ 32 caracteres)
-docker compose up --build   # construye, migra, siembra y arranca
-curl http://localhost:3000/          # → {"status":"ok"}
-# Las rutas de negocio requieren login (cookie de sesión httpOnly):
-curl -c cookies.txt -X POST http://localhost:3000/api/auth/sign-in/email \
-  -H "content-type: application/json" \
-  -d '{"email":"admin@example.com","password":"Admin123!"}'
-curl -b cookies.txt http://localhost:3000/meters    # → 12 medidores
-```
+1. Crea el archivo `.env` en la raíz con las variables de entorno que recibiste
+   (referencia en [Variables de entorno](#variables-de-entorno)).
+2. Levanta la plataforma (construye, migra, siembra y arranca):
+
+   ```bash
+   docker compose up --build
+   ```
+
+3. Verifica:
+
+   ```bash
+   curl http://localhost:3000/          # → {"status":"ok"}
+   ```
 
 Documentación interactiva de la API: http://localhost:3000/docs (spec OpenAPI en http://localhost:3000/openapi.yaml). `/`, `/docs`, `/openapi.yaml` y `/api/auth/*` son públicas; el resto requiere sesión.
 
 Para detener: `docker compose down` (con `-v` elimina también el volumen de datos; el seed lo re-crea al arrancar de nuevo).
-
-## Autenticación
-
-La API usa [better-auth](https://better-auth.com) con sesión por **cookie httpOnly**
-(sin Bearer tokens: el navegador/frontend envía la cookie automáticamente).
-El seed crea un usuario admin para la demo (no hay registro público en el MVP):
-
-| Campo | Valor por defecto | Variable de entorno |
-|---|---|---|
-| Email | `admin@example.com` | `ADMIN_EMAIL` |
-| Password | `Admin123!` | `ADMIN_PASSWORD` |
-
-```bash
-# Iniciar sesión (guarda la cookie) y consumir una ruta protegida:
-curl -c cookies.txt -X POST http://localhost:3000/api/auth/sign-in/email \
-  -H "content-type: application/json" \
-  -d '{"email":"admin@example.com","password":"Admin123!"}'
-curl -b cookies.txt http://localhost:3000/anomalies
-# Sin cookie → 401 {"error":{"code":"UNAUTHORIZED","message":"Authentication required"}}
-```
 
 ## Variables de entorno
 
