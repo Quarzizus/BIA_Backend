@@ -39,8 +39,8 @@ export function createApp(prisma: PrismaClient, options: AppOptions = {}): Expre
   const auth = createAuth(prisma);
   // CORS origin-aware + credentials: el frontend (FRONTEND_ORIGIN) llama directo
   // al backend con cookies de sesión. `*` NO es compatible con credentials —
-  // en local el default es http://localhost:5173 (proxy/llamada directa); en
-  // Railway se fija FRONTEND_ORIGEN a la URL pública del frontend.
+  // en local el default es http://localhost:5173 (proxy/llamada directa);
+  // FRONTEND_ORIGIN se fija por entorno cuando el frontend vive en otro origen.
   app.use(
     cors({
       origin: process.env.FRONTEND_ORIGIN ?? "http://localhost:5173",
