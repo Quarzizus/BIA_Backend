@@ -37,9 +37,16 @@ const OPENAPI_SPEC = readFileSync(OPENAPI_PATH, "utf8");
 export function createApp(prisma: PrismaClient, options: AppOptions = {}): Express {
   const app = express();
   const auth = createAuth(prisma);
-  // F11: CORS abierto para el MVP — el frontend puede llamar directo al backend
-  // (el proxy sigue siendo una opción válida).
-  app.use(cors());
+  // CORS origin-aware + credentials: el frontend (FRONTEND_ORIGIN) llama directo
+  // al backend con cookies de sesión. `*` NO es compatible con credentials —
+  // en local el default es http://localhost:5173 (proxy/llamada directa); en
+  // Railway se fija FRONTEND_ORIGEN a la URL pública del frontend.
+  app.use(
+    cors({
+      origin: process.env.FRONTEND_ORIGIN ?? "http://localhost:5173",
+      credentials: true,
+    }),
+  );
 
   // better-auth antes de express.json(): los body parsers consumen el stream y
   // romperían el parseo interno del handler de auth.
