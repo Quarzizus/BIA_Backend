@@ -41,6 +41,12 @@ export function createDashboardRepository(prisma: PrismaClient): DashboardReposi
       return rows.map((row) => ({ severity: row.severity, count: row._count._all }));
     },
 
+    /** Confianza media de los scores por caso sobre TODAS las anomalías. */
+    async avgConfidence(): Promise<number | null> {
+      const agg = await prisma.anomaly.aggregate({ _avg: { confidence: true } });
+      return agg._avg.confidence ?? null;
+    },
+
     async recentAnomalies(limit: number) {
       return prisma.anomaly.findMany({
         take: limit,

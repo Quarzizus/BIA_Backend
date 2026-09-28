@@ -54,12 +54,139 @@ export const DEFAULT_ANALYSIS_CONFIG: AnalysisConfig = {
   nearMissWindowMs,
 };
 
-/** Severidad → confianza persistida en cada anomalía (diseño D4/D7). */
-export const SEVERITY_CONFIDENCE: Record<Severity, number> = {
-  HIGH: 0.99,
-  MEDIUM: 0.9,
-  LOW: 0.8,
+// ---------------------------------------------------------------------------
+// Score de fuerza de evidencia (confianza por reglas)
+//
+// La "confianza" de una anomalía clasificada POR REGLAS ya no es un mapa fijo
+// severidad→probabilidad fabricada (0.99/0.9/0.8), sino un SCORE transparente
+// derivado de la evidencia persistida: magnitud estadística + variación +
+// cobertura de evento + severidad. NO es probabilidad de un modelo; es un
+// indicador de cuánta evidencia sostiene la clasificación. El LLM solo aporta
+// su propia confidence en el caso límite (needsLlm), donde SÍ hay una
+// probabilidad reportada por el modelo.
+// ---------------------------------------------------------------------------
+
+/** Puntos mínimos del componente estadístico (|max_z| ≤ 3 o sin señales). */
+export const CONFIDENCE_STAT_MIN = 12;
+/** Puntos máximos del componente estadístico (|max_z| ≥ 10). */
+export const CONFIDENCE_STAT_MAX = 40;
+/** |max_z| donde el componente estadístico alcanza el tope. */
+export const CONFIDENCE_STAT_MAX_Z = 10;
+/** |max_z| donde el componente estadístico es mínimo. */
+export const CONFIDENCE_STAT_MIN_Z = 3;
+/** Puntos mínimos del componente de variación (|variación| ≤ 5 %). */
+export const CONFIDENCE_VARIATION_MIN = 4;
+/** Puntos máximos del componente de variación (|variación| ≥ 100 %). */
+export const CONFIDENCE_VARIATION_MAX = 20;
+/** |variación| % donde el componente de variación alcanza el tope. */
+export const CONFIDENCE_VARIATION_MAX_PCT = 100;
+/** |variación| % donde el componente de variación es mínimo. */
+export const CONFIDENCE_VARIATION_MIN_PCT = 5;
+/** Puntos del componente de evento cuando un evento cubre el rango exacto. */
+export const CONFIDENCE_EVENT_COVERED = 20;
+/** Puntos del componente de evento sin cobertura (neutral, no penaliza). */
+export const CONFIDENCE_EVENT_NEUTRAL = 10;
+/** Puntos del componente de severidad (peso de la clasificación). */
+export const CONFIDENCE_SEVERITY: Record<Severity, number> = {
+  HIGH: 20,
+  MEDIUM: 14,
+  LOW: 10,
 };
+/** sd_ratio mínimo para el fallback estadístico de DATA_QUALITY (≤ → mínimo). */
+export const CONFIDENCE_SD_RATIO_MIN = 5;
+/** sd_ratio donde el fallback estadístico de DATA_QUALITY alcanza el tope. */
+export const CONFIDENCE_SD_RATIO_MAX = 10;
+
+/** Lee una señal numérica de forma defensiva: solo números finitos, si no null. */
+function readSignalNumber(signals: unknown, key: string): number | null {
+  if (typeof signals !== "object" || signals === null) return null;
+  const value = (signals as Record<string, unknown>)[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/** Interpolación lineal saturada entre (minInput, minPoints) y (maxInput, maxPoints). */
+function linearPoints(
+  value: number,
+  minInput: number,
+  maxInput: number,
+  minPoints: number,
+  maxPoints: number,
+): number {
+  if (value <= minInput) return minPoints;
+  if (value >= maxInput) return maxPoints;
+  return minPoints + ((value - minInput) / (maxInput - minInput)) * (maxPoints - minPoints);
+}
+
+/** Componente estadístico (hasta 40 pts): |max_z|; si falta, sd_ratio de DQ; si no, mínimo. */
+function statisticalPoints(signals: unknown): number {
+  const maxZ = readSignalNumber(signals, "max_z");
+  if (maxZ !== null) {
+    return linearPoints(
+      Math.abs(maxZ),
+      CONFIDENCE_STAT_MIN_Z,
+      CONFIDENCE_STAT_MAX_Z,
+      CONFIDENCE_STAT_MIN,
+      CONFIDENCE_STAT_MAX,
+    );
+  }
+  // DATA_QUALITY persiste max_z null: la magnitud es la incoherencia eléctrica,
+  // medida por el mayor sd_ratio (voltaje o factor de potencia) vs baseline.
+  const voltageSd = readSignalNumber(signals, "voltage_sd_ratio");
+  const pfSd = readSignalNumber(signals, "power_factor_sd_ratio");
+  const sdRatio = voltageSd !== null && pfSd !== null ? Math.max(voltageSd, pfSd) : (voltageSd ?? pfSd);
+  if (sdRatio !== null) {
+    return linearPoints(
+      sdRatio,
+      CONFIDENCE_SD_RATIO_MIN,
+      CONFIDENCE_SD_RATIO_MAX,
+      CONFIDENCE_STAT_MIN,
+      CONFIDENCE_STAT_MAX,
+    );
+  }
+  return CONFIDENCE_STAT_MIN;
+}
+
+/** Componente de variación (hasta 20 pts): |variation_pct|; sin señal, mínimo. */
+function variationPoints(signals: unknown): number {
+  const variation = readSignalNumber(signals, "variation_pct");
+  if (variation === null) return CONFIDENCE_VARIATION_MIN;
+  return linearPoints(
+    Math.abs(variation),
+    CONFIDENCE_VARIATION_MIN_PCT,
+    CONFIDENCE_VARIATION_MAX_PCT,
+    CONFIDENCE_VARIATION_MIN,
+    CONFIDENCE_VARIATION_MAX,
+  );
+}
+
+/**
+ * Score de fuerza de evidencia (0-1) de una anomalía clasificada POR REGLAS.
+ *
+ * Fórmula: clamp(0, 1, round((statistical + variation + event + severity) / 100, 2))
+ *  - statistical (40): |signals.max_z| — ≤ 3 → 12, ≥ 10 → 40, lineal entre ambos.
+ *    Si max_z es null (p. ej. DATA_QUALITY): max(voltage_sd_ratio,
+ *    power_factor_sd_ratio) — ≤ 5 → 12, ≥ 10 → 40, lineal; si tampoco hay → 12.
+ *  - variation (20): |signals.variation_pct| — ≤ 5 % → 4, ≥ 100 % → 20, lineal.
+ *  - event (20): 20 si un evento cubre el rango exacto (eventCovered), 10 si no.
+ *  - severity (20): HIGH → 20, MEDIUM → 14, LOW → 10.
+ *
+ * Es un SCORE de evidencia, NO una probabilidad de un modelo. El LLM conserva
+ * su propia confidence solo en el camino borderline (needsLlm). La lectura de
+ * `signals` es defensiva (Json de forma libre): valores no numéricos o
+ * no finitos se tratan como ausentes.
+ */
+export function computeAnomalyConfidence(input: {
+  severity: Severity;
+  signals: unknown;
+  eventCovered: boolean;
+}): number {
+  const raw =
+    statisticalPoints(input.signals) +
+    variationPoints(input.signals) +
+    (input.eventCovered ? CONFIDENCE_EVENT_COVERED : CONFIDENCE_EVENT_NEUTRAL) +
+    CONFIDENCE_SEVERITY[input.severity];
+  return Math.min(1, Math.max(0, Math.round((raw / 100) * 100) / 100));
+}
 
 export type DetectionType = "SPIKE" | "PERSISTENT_CHANGE" | "DATA_QUALITY";
 

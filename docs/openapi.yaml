@@ -1010,9 +1010,11 @@ components:
         confidence:
           type: number
           description: |
-            Confianza de la clasificación (0-1). Cuando el LLM clasifica el caso
-            límite se persiste su confianza; en la clasificación por reglas se
-            usa el valor por severidad (HIGH 0.99, MEDIUM 0.9, LOW 0.8).
+            Score de fuerza de evidencia (0-1) calculado por el backend:
+            magnitud estadística (|max_z| o sd_ratio de DQ) + variación +
+            cobertura de evento + severidad. NO es probabilidad de un modelo;
+            el LLM solo aporta su propia confianza en clasificaciones ambiguas
+            (caso límite).
         status:
           $ref: "#/components/schemas/AnomalyStatus"
         recommended_action:
@@ -1271,6 +1273,9 @@ components:
         severity_counts:
           $ref: "#/components/schemas/OpenBySeverity"
           description: Conteos por severidad de TODAS las anomalías (cualquier estado, incl. RESOLVED) — agregación server-exacta para el donut y KPIs del dashboard
+        avg_confidence:
+          type: [number, "null"]
+          description: Confianza media de los scores por caso (0-1) sobre TODAS las anomalías — null si no hay ninguna. No es probabilidad del modelo, es el score de fuerza de evidencia.
         recent_anomalies:
           type: array
           description: Anomalías abiertas más recientes (máx. 5)

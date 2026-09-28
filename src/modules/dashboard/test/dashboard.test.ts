@@ -133,6 +133,12 @@ describe("GET /dashboard/summary", () => {
     expect(body.severity_counts.LOW).toBe(1);
   });
 
+  test("avg_confidence es el promedio real de los scores por caso (TODAS las anomalías)", async () => {
+    const body = (await (await fetch(`${server.baseUrl}/dashboard/summary`)).json()) as Record<string, any>;
+    // Fixture: las 4 anomalías usan confidence 0.9 → promedio 0.9.
+    expect(body.avg_confidence).toBe(0.9);
+  });
+
   test("last_analysis expone fecha/hora y estado del run más reciente (KPI dashboard)", async () => {
     const body = (await (await fetch(`${server.baseUrl}/dashboard/summary`)).json()) as Record<string, any>;
     expect(body.last_analysis).not.toBeNull();

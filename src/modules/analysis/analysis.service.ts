@@ -22,7 +22,7 @@ import {
   FALLBACK_REASON,
   FALLBACK_REASON_SIMPLE,
   LLM_CONCURRENCY,
-  SEVERITY_CONFIDENCE,
+  computeAnomalyConfidence,
   type AnalysisConfig,
 } from "./analysis.domain";
 import type { LlmClient } from "./llm/analysis.llm.client";
@@ -165,9 +165,19 @@ export function createAnalysisService(
 
     let type = classification.type;
     let severity = classification.severity;
-    // F5: por defecto la confianza de la clasificación POR REGLAS (no hay
-    // confianza de un modelo); si el LLM clasifica, se usa su confidence.
-    let confidence = SEVERITY_CONFIDENCE[severity];
+    // Score de fuerza de evidencia para la clasificación POR REGLAS (no es
+    // probabilidad de un modelo): magnitud estadística + variación + cobertura
+    // de evento + severidad (ver computeAnomalyConfidence en analysis.domain).
+    // La rama cached/needsLlm lo sobrescribe con su propio valor; el fallback
+    // del classify catch y la rama de explicación conservan este score.
+    let confidence = computeAnomalyConfidence({
+      severity,
+      signals: consolidated.signals,
+      // La cobertura cuenta solo si el evento EXPLICA la clasificación
+      // (SCHEDULED_OUTAGE/OPERATIONAL_CHANGE/DATA_QUALITY): un evento UNKNOWN no
+      // aporta confianza a una REAL_ANOMALY (por eso el clasificador la marcó real).
+      eventCovered: covering !== null && covering.eventType !== "UNKNOWN",
+    });
     let reason: string;
     let recommendedAction: string;
     let reasonSimple: string;

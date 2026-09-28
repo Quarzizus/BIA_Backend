@@ -34,6 +34,8 @@ export interface DashboardSummary {
   open_by_severity: { HIGH: number; MEDIUM: number; LOW: number };
   /** Conteos por severidad de TODAS las anomalías (cualquier estado, incl. RESOLVED) — agregación server-exacta para donut/KPIs. */
   severity_counts: { HIGH: number; MEDIUM: number; LOW: number };
+  /** Confianza media de los scores por caso (0-1) sobre TODAS las anomalías; null si no hay ninguna. */
+  avg_confidence: number | null;
   recent_anomalies: RecentAnomalyDto[];
   /** Último análisis ejecutado (null si nunca se ha corrido uno). */
   last_analysis: LastAnalysisDto | null;
@@ -60,6 +62,7 @@ export interface DashboardRepository {
   meterStatusCounts(): Promise<Array<{ status: MeterStatus; count: number }>>;
   openBySeverityCounts(): Promise<Array<{ severity: Severity; count: number }>>;
   severityCounts(): Promise<Array<{ severity: Severity; count: number }>>;
+  avgConfidence(): Promise<number | null>;
   recentAnomalies(limit: number): Promise<RecentAnomalyRow[]>;
   /** Run de análisis más reciente (null si nunca se ha ejecutado uno). */
   lastAnalysis(): Promise<AnalysisRun | null>;
